@@ -33,15 +33,40 @@ class FirebaseService {
   }
   
   Future<UserModel?> getUserById(String userId) async {
-    final doc = await _firestore.collection(_usersCollection).doc(userId).get();
-    if (doc.exists) {
-      return UserModel.fromMap(doc.data()!, doc.id);
+    try {
+      debugPrint("FirebaseService: Fetching user with ID $userId from Firestore");
+      final doc = await _firestore.collection(_usersCollection).doc(userId).get();
+      
+      if (doc.exists) {
+        final userData = doc.data();
+        if (userData != null) {
+          debugPrint("FirebaseService: User found: ${userData['name']}");
+          return UserModel.fromMap(userData, doc.id);
+        } else {
+          debugPrint("FirebaseService: User document exists but data is null");
+          return null;
+        }
+      } else {
+        debugPrint("FirebaseService: User not found in Firestore");
+        return null;
+      }
+    } catch (e) {
+      debugPrint("FirebaseService: Error fetching user: $e");
+      rethrow;
     }
-    return null;
   }
   
   Future<void> updateUser(UserModel user) async {
-    await _firestore.collection(_usersCollection).doc(user.id).update(user.toMap());
+    try {
+      debugPrint("FirebaseService: Updating user with ID ${user.id} in Firestore");
+      final userMap = user.toMap();
+      debugPrint("User update data: $userMap");
+      await _firestore.collection(_usersCollection).doc(user.id).update(userMap);
+      debugPrint("FirebaseService: User updated successfully in Firestore");
+    } catch (e) {
+      debugPrint("FirebaseService: Error updating user: $e");
+      rethrow;
+    }
   }
   
   // Appointment operations
@@ -82,47 +107,74 @@ class FirebaseService {
   
   // Fetch upcoming appointments
   Future<List<AppointmentModel>> getUpcomingAppointments(String userId, bool isDoctor) async {
-    String userField = isDoctor ? 'doctorId' : 'patientId';
-    
-    final snapshot = await _firestore
-        .collection(_appointmentsCollection)
-        .where(userField, isEqualTo: userId)
-        .where('status', isEqualTo: 'upcoming')
-        .get();
-        
-    return snapshot.docs
-        .map((doc) => AppointmentModel.fromMap(doc.data(), doc.id))
-        .toList();
+    try {
+      String userField = isDoctor ? 'doctorId' : 'patientId';
+      debugPrint("FirebaseService: Fetching upcoming appointments for $userField: $userId");
+      
+      final snapshot = await _firestore
+          .collection(_appointmentsCollection)
+          .where(userField, isEqualTo: userId)
+          .where('status', isEqualTo: 'upcoming')
+          .get();
+          
+      final appointments = snapshot.docs
+          .map((doc) => AppointmentModel.fromMap(doc.data(), doc.id))
+          .toList();
+          
+      debugPrint("FirebaseService: Found ${appointments.length} upcoming appointments");
+      return appointments;
+    } catch (e) {
+      debugPrint("FirebaseService: Error fetching upcoming appointments: $e");
+      return [];
+    }
   }
 
   // Fetch past appointments
   Future<List<AppointmentModel>> getPastAppointments(String userId, bool isDoctor) async {
-    String userField = isDoctor ? 'doctorId' : 'patientId';
-    
-    final snapshot = await _firestore
-        .collection(_appointmentsCollection)
-        .where(userField, isEqualTo: userId)
-        .where('status', isEqualTo: 'past')
-        .get();
-        
-    return snapshot.docs
-        .map((doc) => AppointmentModel.fromMap(doc.data(), doc.id))
-        .toList();
+    try {
+      String userField = isDoctor ? 'doctorId' : 'patientId';
+      debugPrint("FirebaseService: Fetching past appointments for $userField: $userId");
+      
+      final snapshot = await _firestore
+          .collection(_appointmentsCollection)
+          .where(userField, isEqualTo: userId)
+          .where('status', isEqualTo: 'past')
+          .get();
+          
+      final appointments = snapshot.docs
+          .map((doc) => AppointmentModel.fromMap(doc.data(), doc.id))
+          .toList();
+          
+      debugPrint("FirebaseService: Found ${appointments.length} past appointments");
+      return appointments;
+    } catch (e) {
+      debugPrint("FirebaseService: Error fetching past appointments: $e");
+      return [];
+    }
   }
 
   // Fetch cancelled appointments
   Future<List<AppointmentModel>> getCancelledAppointments(String userId, bool isDoctor) async {
-    String userField = isDoctor ? 'doctorId' : 'patientId';
-    
-    final snapshot = await _firestore
-        .collection(_appointmentsCollection)
-        .where(userField, isEqualTo: userId)
-        .where('status', isEqualTo: 'cancelled')
-        .get();
-        
-    return snapshot.docs
-        .map((doc) => AppointmentModel.fromMap(doc.data(), doc.id))
-        .toList();
+    try {
+      String userField = isDoctor ? 'doctorId' : 'patientId';
+      debugPrint("FirebaseService: Fetching cancelled appointments for $userField: $userId");
+      
+      final snapshot = await _firestore
+          .collection(_appointmentsCollection)
+          .where(userField, isEqualTo: userId)
+          .where('status', isEqualTo: 'cancelled')
+          .get();
+          
+      final appointments = snapshot.docs
+          .map((doc) => AppointmentModel.fromMap(doc.data(), doc.id))
+          .toList();
+          
+      debugPrint("FirebaseService: Found ${appointments.length} cancelled appointments");
+      return appointments;
+    } catch (e) {
+      debugPrint("FirebaseService: Error fetching cancelled appointments: $e");
+      return [];
+    }
   }
   
   // Helper method to convert AppointmentStatus to string
@@ -139,27 +191,87 @@ class FirebaseService {
   
   // Chat operations
   Future<String> createChat(ChatModel chat) async {
-    final chatId = _uuid.v4();
-    final chatWithId = chat.copyWith(id: chatId);
-    await _firestore.collection(_chatsCollection).doc(chatId).set(chatWithId.toMap());
-    return chatId;
+    try {
+      debugPrint("FirebaseService: Creating new chat with ID ${chat.id}");
+      final chatId = _uuid.v4();
+      final chatWithId = chat.copyWith(id: chatId);
+      await _firestore.collection(_chatsCollection).doc(chatId).set(chatWithId.toMap());
+      debugPrint("FirebaseService: Chat created successfully");
+      return chatId;
+    } catch (e) {
+      debugPrint("FirebaseService: Error creating chat: $e");
+      rethrow;
+    }
   }
   
   Future<List<ChatModel>> getChatsForUser(String userId) async {
-    final snapshot = await _firestore.collection(_chatsCollection)
-        .where('participants', arrayContains: userId)
-        .orderBy('lastMessageTime', descending: true)
-        .get();
-    
-    return snapshot.docs.map((doc) => ChatModel.fromMap(doc.data(), doc.id)).toList();
+    try {
+      debugPrint("FirebaseService: Fetching chats for user $userId");
+      final snapshot = await _firestore.collection(_chatsCollection)
+          .where('participants', arrayContains: userId)
+          .orderBy('lastMessageTime', descending: true)
+          .get();
+      
+      final chats = snapshot.docs.map((doc) => ChatModel.fromMap(doc.data(), doc.id)).toList();
+      
+      // For each chat, get the other participant's details
+      for (int i = 0; i < chats.length; i++) {
+        final chat = chats[i];
+        final otherParticipants = chat.participants.where((id) => id != userId).toList();
+        
+        if (otherParticipants.isNotEmpty) {
+          // Get the first other participant (typically a doctor or assistant)
+          final otherUserId = otherParticipants.first;
+          
+          try {
+            final userDoc = await _firestore.collection(_usersCollection).doc(otherUserId).get();
+            if (userDoc.exists) {
+              final userData = userDoc.data();
+              if (userData != null) {
+                Map<String, dynamic> participantDetails = {
+                  'name': userData['name'] ?? 'Unknown',
+                  'role': userData['role'] ?? 'user',
+                  'specialty': userData['specialty'] ?? 
+                               (userData['medicalInfo'] != null ? userData['medicalInfo']['specialty'] : null),
+                  'isOnline': false, // Default to offline
+                };
+                
+                // Overwrite with any specific details 
+                if (chat.participantDetails != null) {
+                  participantDetails.addAll(chat.participantDetails!);
+                }
+                
+                // Update the chat with participant details
+                chats[i] = chat.copyWith(participantDetails: participantDetails);
+              }
+            }
+          } catch (e) {
+            debugPrint("FirebaseService: Error fetching participant details: $e");
+          }
+        }
+      }
+      
+      debugPrint("FirebaseService: Retrieved ${chats.length} chats for user");
+      return chats;
+    } catch (e) {
+      debugPrint("FirebaseService: Error fetching chats: $e");
+      rethrow;
+    }
   }
   
   Future<void> updateChatLastMessage(String chatId, String message, Timestamp timestamp) async {
-    await _firestore.collection(_chatsCollection).doc(chatId).update({
-      'lastMessage': message,
-      'lastMessageTime': timestamp,
-      'updatedAt': timestamp,
-    });
+    try {
+      debugPrint("FirebaseService: Updating last message for chat $chatId");
+      await _firestore.collection(_chatsCollection).doc(chatId).update({
+        'lastMessage': message,
+        'lastMessageTime': timestamp,
+        'updatedAt': timestamp,
+      });
+      debugPrint("FirebaseService: Chat last message updated successfully");
+    } catch (e) {
+      debugPrint("FirebaseService: Error updating chat last message: $e");
+      rethrow;
+    }
   }
   
   Future<void> incrementUnreadCount(String chatId) async {
@@ -241,5 +353,25 @@ class FirebaseService {
     // This is a placeholder method for file deletion since we're not using Firebase Storage
     debugPrint('Deleting file: $path');
     // In a real app, this would delete from Firebase Storage
+  }
+
+  // Get all doctors
+  Future<List<UserModel>> getDoctors() async {
+    try {
+      final querySnapshot = await _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'doctor')
+          .get();
+      
+      final doctors = querySnapshot.docs.map((doc) {
+        return UserModel.fromMap(doc.data(), doc.id);
+      }).toList();
+      
+      debugPrint('FirebaseService: Successfully retrieved ${doctors.length} doctors');
+      return doctors;
+    } catch (e) {
+      debugPrint('FirebaseService: Error getting doctors: $e');
+      return [];
+    }
   }
 } 

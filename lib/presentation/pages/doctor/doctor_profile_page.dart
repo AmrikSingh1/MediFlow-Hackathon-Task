@@ -9,35 +9,50 @@ import 'package:medi_connect/presentation/widgets/gradient_button.dart';
 import 'package:medi_connect/presentation/widgets/custom_text_field.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-class PatientProfilePage extends ConsumerStatefulWidget {
-  const PatientProfilePage({super.key});
+class DoctorProfilePage extends ConsumerStatefulWidget {
+  const DoctorProfilePage({super.key});
 
   @override
-  ConsumerState<PatientProfilePage> createState() => _PatientProfilePageState();
+  ConsumerState<DoctorProfilePage> createState() => _DoctorProfilePageState();
 }
 
-class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
+class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
   final _formKey = GlobalKey<FormState>();
   
+  // Professional Information
+  final _specialtyController = TextEditingController();
+  final _hospitalAffiliationController = TextEditingController();
+  final _licenseNumberController = TextEditingController();
+  final _yearsExperienceController = TextEditingController();
+  final _educationController = TextEditingController();
+  
   // Personal Information
-  final _dobController = TextEditingController();
-  String _selectedGender = 'Male';
-  final _heightController = TextEditingController();
-  final _weightController = TextEditingController();
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
-  
-  // Medical Information
-  final _allergiesController = TextEditingController();
-  final _medicationsController = TextEditingController();
-  final _chronicConditionsController = TextEditingController();
-  final _surgicalHistoryController = TextEditingController();
-  final _familyHistoryController = TextEditingController();
+  final _bioController = TextEditingController();
   
   bool _isLoading = false;
   bool _isLoadingData = true;
   UserModel? _currentUser;
-  final List<String> _genders = ['Male', 'Female', 'Other', 'Prefer not to say'];
+  final List<String> _specialties = [
+    'Cardiologist',
+    'Dermatologist',
+    'Endocrinologist',
+    'Gastroenterologist',
+    'Neurologist',
+    'Obstetrician',
+    'Oncologist',
+    'Ophthalmologist',
+    'Orthopedist',
+    'Pediatrician',
+    'Psychiatrist',
+    'Pulmonologist',
+    'Rheumatologist',
+    'Urologist',
+    'General Practitioner',
+    'Other'
+  ];
+  String _selectedSpecialty = 'General Practitioner';
   
   @override
   void initState() {
@@ -57,21 +72,18 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
       if (user != null) {
         _currentUser = await authService.getCurrentUserData();
         
-        if (_currentUser != null && _currentUser!.medicalInfo != null) {
-          final medicalInfo = _currentUser!.medicalInfo!;
+        if (_currentUser != null && _currentUser!.doctorInfo != null) {
+          final doctorInfo = _currentUser!.doctorInfo!;
           
           // Set values from user data
-          _dobController.text = medicalInfo['dateOfBirth'] ?? '';
-          _selectedGender = medicalInfo['gender'] ?? 'Male';
-          _heightController.text = medicalInfo['height']?.toString() ?? '';
-          _weightController.text = medicalInfo['weight']?.toString() ?? '';
+          _selectedSpecialty = doctorInfo['specialty'] ?? 'General Practitioner';
+          _hospitalAffiliationController.text = doctorInfo['hospitalAffiliation'] ?? '';
+          _licenseNumberController.text = doctorInfo['licenseNumber'] ?? '';
+          _yearsExperienceController.text = doctorInfo['yearsExperience']?.toString() ?? '';
+          _educationController.text = doctorInfo['education'] ?? '';
           _phoneController.text = _currentUser!.phoneNumber ?? '';
-          _addressController.text = medicalInfo['address'] ?? '';
-          _allergiesController.text = medicalInfo['allergies'] ?? '';
-          _medicationsController.text = medicalInfo['medications'] ?? '';
-          _chronicConditionsController.text = medicalInfo['chronicConditions'] ?? '';
-          _surgicalHistoryController.text = medicalInfo['surgicalHistory'] ?? '';
-          _familyHistoryController.text = medicalInfo['familyHistory'] ?? '';
+          _addressController.text = doctorInfo['address'] ?? '';
+          _bioController.text = doctorInfo['bio'] ?? '';
         } else if (_currentUser != null) {
           // Set just the phone number if we have it
           _phoneController.text = _currentUser!.phoneNumber ?? '';
@@ -90,45 +102,15 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
   
   @override
   void dispose() {
-    _dobController.dispose();
-    _heightController.dispose();
-    _weightController.dispose();
+    _specialtyController.dispose();
+    _hospitalAffiliationController.dispose();
+    _licenseNumberController.dispose();
+    _yearsExperienceController.dispose();
+    _educationController.dispose();
     _phoneController.dispose();
     _addressController.dispose();
-    _allergiesController.dispose();
-    _medicationsController.dispose();
-    _chronicConditionsController.dispose();
-    _surgicalHistoryController.dispose();
-    _familyHistoryController.dispose();
+    _bioController.dispose();
     super.dispose();
-  }
-  
-  Future<void> _selectDate(BuildContext context) async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime(1900),
-      lastDate: DateTime.now(),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: Color(0xFF8A70D6),
-              onPrimary: Colors.white,
-              onSurface: Color(0xFF2D3748),
-            ),
-            dialogBackgroundColor: Colors.white,
-          ),
-          child: child!,
-        );
-      },
-    );
-    
-    if (picked != null) {
-      setState(() {
-        _dobController.text = "${picked.day}/${picked.month}/${picked.year}";
-      });
-    }
   }
   
   void _saveProfile() async {
@@ -141,33 +123,30 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
         final authService = AuthService();
         final user = await authService.getCurrentUser();
         
-        // Create medical info map
-        final Map<String, dynamic> medicalInfo = {
-          'dateOfBirth': _dobController.text,
-          'gender': _selectedGender,
-          'height': int.tryParse(_heightController.text),
-          'weight': double.tryParse(_weightController.text),
+        // Create doctor info map
+        final Map<String, dynamic> doctorInfo = {
+          'specialty': _selectedSpecialty,
+          'hospitalAffiliation': _hospitalAffiliationController.text,
+          'licenseNumber': _licenseNumberController.text,
+          'yearsExperience': int.tryParse(_yearsExperienceController.text),
+          'education': _educationController.text,
           'address': _addressController.text,
-          'allergies': _allergiesController.text,
-          'medications': _medicationsController.text,
-          'chronicConditions': _chronicConditionsController.text,
-          'surgicalHistory': _surgicalHistoryController.text,
-          'familyHistory': _familyHistoryController.text,
+          'bio': _bioController.text,
         };
         
         // If we don't have a current user, create a dummy one for demo purposes
         // HACK: This is just for demo purposes and would be replaced with proper auth in production
         if (user == null || _currentUser == null) {
-          debugPrint('Creating demo user profile for testing');
+          debugPrint('Creating demo doctor profile for testing');
           
           // Create a demo user
           final demoUser = UserModel(
-            id: 'demo-user-${DateTime.now().millisecondsSinceEpoch}',
-            name: 'Demo Patient',
-            email: 'demo@example.com',
+            id: 'demo-doctor-${DateTime.now().millisecondsSinceEpoch}',
+            name: 'Dr. Demo',
+            email: 'doctor@example.com',
             phoneNumber: _phoneController.text,
-            role: UserRole.patient,
-            medicalInfo: medicalInfo,
+            role: UserRole.doctor,
+            doctorInfo: doctorInfo,
             createdAt: Timestamp.now(),
             updatedAt: Timestamp.now(),
           );
@@ -186,8 +165,8 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
                 margin: const EdgeInsets.all(10),
               ),
             );
-            // Navigate to patient home dashboard
-            Navigator.of(context).pushReplacementNamed(Routes.home);
+            // Navigate to doctor dashboard instead of home
+            Navigator.of(context).pushReplacementNamed(Routes.doctorDashboard);
           }
           return;
         }
@@ -196,7 +175,7 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
         // Update user model
         final updatedUser = _currentUser!.copyWith(
           phoneNumber: _phoneController.text,
-          medicalInfo: medicalInfo,
+          doctorInfo: doctorInfo,
           updatedAt: Timestamp.now(),
         );
         
@@ -215,8 +194,8 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
               margin: const EdgeInsets.all(10),
             ),
           );
-          // Navigate to patient home dashboard
-          Navigator.of(context).pushReplacementNamed(Routes.home);
+          // Navigate to doctor dashboard instead of home
+          Navigator.of(context).pushReplacementNamed(Routes.doctorDashboard);
         }
       } catch (e) {
         debugPrint('Error saving profile: $e');
@@ -321,7 +300,7 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
             const SizedBox(width: 16),
             Expanded(
               child: Text(
-                'Complete Your Profile',
+                'Complete Your Doctor Profile',
                 style: AppTypography.headlineMedium.copyWith(
                   fontWeight: FontWeight.bold,
                   color: const Color(0xFF2D3748),
@@ -332,7 +311,7 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
         ),
         const SizedBox(height: 16),
         Text(
-          'Please provide your information to personalize your healthcare experience',
+          'Please provide your professional information to help patients find you',
           style: AppTypography.bodyMedium.copyWith(
             color: const Color(0xFF718096),
           ),
@@ -530,9 +509,9 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Personal Information Section
+              // Professional Information Section
               Text(
-                'Personal Information',
+                'Professional Information',
                 style: AppTypography.titleLarge.copyWith(
                   fontWeight: FontWeight.w600,
                   color: const Color(0xFF2D3748),
@@ -540,23 +519,7 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
               ),
               const SizedBox(height: 20),
               
-              // Date of Birth
-              CustomTextField(
-                controller: _dobController,
-                label: 'Date of Birth',
-                hint: 'DD/MM/YYYY',
-                prefixIcon: Icons.calendar_today,
-                readOnly: true,
-                onTap: () => _selectDate(context),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your date of birth';
-                  }
-                  return null;
-                },
-              ),
-              
-              // Gender Dropdown
+              // Specialty Dropdown
               Container(
                 margin: const EdgeInsets.symmetric(vertical: 8),
                 decoration: BoxDecoration(
@@ -568,14 +531,14 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
                   ),
                 ),
                 child: DropdownButtonFormField<String>(
-                  value: _selectedGender,
+                  value: _selectedSpecialty,
                   decoration: InputDecoration(
-                    labelText: 'Gender',
+                    labelText: 'Specialty',
                     labelStyle: AppTypography.bodyMedium.copyWith(
                       color: const Color(0xFF718096),
                     ),
                     prefixIcon: const Icon(
-                      Icons.person_outline,
+                      Icons.medical_services,
                       color: Color(0xFF9AA5B1),
                       size: 22,
                     ),
@@ -585,16 +548,16 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
                       vertical: 18,
                     ),
                   ),
-                  items: _genders.map((gender) {
+                  items: _specialties.map((specialty) {
                     return DropdownMenuItem(
-                      value: gender,
-                      child: Text(gender),
+                      value: specialty,
+                      child: Text(specialty),
                     );
                   }).toList(),
                   onChanged: (value) {
                     if (value != null) {
                       setState(() {
-                        _selectedGender = value;
+                        _selectedSpecialty = value;
                       });
                     }
                   },
@@ -607,48 +570,79 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
                 ),
               ),
               
-              // Height and Weight Row
-              Row(
-                children: [
-                  Expanded(
-                    child: CustomTextField(
-                      controller: _heightController,
-                      label: 'Height (cm)',
-                      hint: '175',
-                      prefixIcon: Icons.height,
-                      keyboardType: TextInputType.number,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Required';
-                        }
-                        if (int.tryParse(value) == null) {
-                          return 'Invalid';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: CustomTextField(
-                      controller: _weightController,
-                      label: 'Weight (kg)',
-                      hint: '70',
-                      prefixIcon: Icons.monitor_weight_outlined,
-                      keyboardType: TextInputType.number,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Required';
-                        }
-                        if (double.tryParse(value) == null) {
-                          return 'Invalid';
-                        }
-                        return null;
-                      },
-                    ),
-                  ),
-                ],
+              // Hospital Affiliation
+              CustomTextField(
+                controller: _hospitalAffiliationController,
+                label: 'Hospital/Clinic Affiliation',
+                hint: 'e.g. Metro General Hospital',
+                prefixIcon: Icons.local_hospital,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter your hospital or clinic affiliation';
+                  }
+                  return null;
+                },
               ),
+              
+              // License Number
+              CustomTextField(
+                controller: _licenseNumberController,
+                label: 'License Number',
+                hint: 'e.g. MD12345678',
+                prefixIcon: Icons.badge,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter your medical license number';
+                  }
+                  return null;
+                },
+              ),
+              
+              // Years of Experience
+              CustomTextField(
+                controller: _yearsExperienceController,
+                label: 'Years of Experience',
+                hint: 'e.g. 10',
+                prefixIcon: Icons.work_history,
+                keyboardType: TextInputType.number,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Required';
+                  }
+                  if (int.tryParse(value) == null) {
+                    return 'Please enter a valid number';
+                  }
+                  return null;
+                },
+              ),
+              
+              // Education
+              CustomTextField(
+                controller: _educationController,
+                label: 'Education',
+                hint: 'e.g. MD, Harvard Medical School',
+                prefixIcon: Icons.school,
+                maxLines: 2,
+                contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter your education details';
+                  }
+                  return null;
+                },
+              ),
+              
+              const SizedBox(height: 32),
+              
+              // Personal Information Section
+              Text(
+                'Contact Information',
+                style: AppTypography.titleLarge.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF2D3748),
+                ),
+              ),
+              const SizedBox(height: 20),
               
               // Phone Number
               CustomTextField(
@@ -668,85 +662,34 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
               // Address
               CustomTextField(
                 controller: _addressController,
-                label: 'Address',
-                hint: 'Enter your full address',
-                prefixIcon: Icons.home,
+                label: 'Office Address',
+                hint: 'Enter your office address',
+                prefixIcon: Icons.location_on,
                 keyboardType: TextInputType.streetAddress,
                 maxLines: 2,
                 contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
                 validator: (value) {
                   if (value == null || value.isEmpty) {
-                    return 'Please enter your address';
+                    return 'Please enter your office address';
                   }
                   return null;
                 },
               ),
               
-              const SizedBox(height: 32),
-              
-              // Medical Information Section
-              Text(
-                'Medical Information',
-                style: AppTypography.titleLarge.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF2D3748),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'This information will help your doctor provide better care.',
-                style: AppTypography.bodySmall.copyWith(
-                  color: const Color(0xFF718096),
-                ),
-              ),
-              const SizedBox(height: 20),
-              
-              // Allergies
+              // Bio
               CustomTextField(
-                controller: _allergiesController,
-                label: 'Allergies',
-                hint: 'Enter any allergies you have',
-                prefixIcon: Icons.warning_amber_rounded,
-              ),
-              
-              // Current Medications
-              CustomTextField(
-                controller: _medicationsController,
-                label: 'Current Medications',
-                hint: 'Enter any medications you are taking',
-                prefixIcon: Icons.medication,
-                maxLines: 2,
+                controller: _bioController,
+                label: 'Professional Bio',
+                hint: 'Tell patients about yourself and your practice...',
+                prefixIcon: Icons.description,
+                maxLines: 4,
                 contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
-              ),
-              
-              // Chronic Conditions
-              CustomTextField(
-                controller: _chronicConditionsController,
-                label: 'Chronic Conditions',
-                hint: 'Enter any chronic health conditions',
-                prefixIcon: Icons.health_and_safety,
-                maxLines: 2,
-                contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
-              ),
-              
-              // Surgical History
-              CustomTextField(
-                controller: _surgicalHistoryController,
-                label: 'Surgical History',
-                hint: 'Enter any past surgeries',
-                prefixIcon: Icons.medical_services,
-                maxLines: 2,
-                contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
-              ),
-              
-              // Family Medical History
-              CustomTextField(
-                controller: _familyHistoryController,
-                label: 'Family Medical History',
-                hint: 'Enter any relevant family medical history',
-                prefixIcon: Icons.family_restroom,
-                maxLines: 2,
-                contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter your professional bio';
+                  }
+                  return null;
+                },
               ),
               
               const SizedBox(height: 32),

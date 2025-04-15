@@ -6,7 +6,9 @@ import 'package:medi_connect/presentation/pages/splash_page.dart';
 import 'package:medi_connect/presentation/pages/home/home_page.dart';
 import 'package:medi_connect/presentation/pages/patient/patient_profile_page.dart';
 import 'package:medi_connect/presentation/pages/patient/pre_anamnesis_page.dart';
+import 'package:medi_connect/presentation/pages/patient/book_appointment_page.dart';
 import 'package:medi_connect/presentation/pages/doctor/doctor_dashboard_page.dart';
+import 'package:medi_connect/presentation/pages/doctor/doctor_profile_page.dart';
 import 'package:medi_connect/presentation/pages/doctor/patient_detail_page.dart';
 import 'package:medi_connect/presentation/pages/chat/chat_page.dart';
 import 'package:medi_connect/core/widgets/health_icon_showcase.dart';
@@ -20,7 +22,9 @@ class Routes {
   static const String home = '/home';
   static const String patientProfile = '/patient/profile';
   static const String preAnamnesis = '/patient/pre-anamnesis';
+  static const String bookAppointment = '/patient/book-appointment';
   static const String doctorDashboard = '/doctor/dashboard';
+  static const String doctorProfile = '/doctor/profile';
   static const String patientDetail = '/doctor/patient/:id';
   static const String chat = '/chat/:id';
   static const String completeProfile = '/complete-profile';
@@ -74,9 +78,21 @@ class AppRouter {
           settings: settings,
         );
         
+      case Routes.bookAppointment:
+        return MaterialPageRoute(
+          builder: (_) => const BookAppointmentPage(),
+          settings: settings,
+        );
+        
       case Routes.doctorDashboard:
         return MaterialPageRoute(
           builder: (_) => const DoctorDashboardPage(),
+          settings: settings,
+        );
+        
+      case Routes.doctorProfile:
+        return MaterialPageRoute(
+          builder: (_) => const DoctorProfilePage(),
           settings: settings,
         );
         

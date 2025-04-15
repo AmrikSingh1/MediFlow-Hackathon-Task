@@ -10,6 +10,7 @@ class UserModel {
   final UserRole role;
   final String? profileImageUrl;
   final Map<String, dynamic>? medicalInfo;
+  final Map<String, dynamic>? doctorInfo;
   final Timestamp createdAt;
   final Timestamp updatedAt;
   
@@ -21,6 +22,7 @@ class UserModel {
     required this.role,
     this.profileImageUrl,
     this.medicalInfo,
+    this.doctorInfo,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -33,6 +35,7 @@ class UserModel {
       'role': role == UserRole.patient ? 'patient' : 'doctor',
       'profileImageUrl': profileImageUrl,
       'medicalInfo': medicalInfo,
+      'doctorInfo': doctorInfo,
       'createdAt': createdAt,
       'updatedAt': updatedAt,
     };
@@ -47,6 +50,7 @@ class UserModel {
       role: map['role'] == 'patient' ? UserRole.patient : UserRole.doctor,
       profileImageUrl: map['profileImageUrl'],
       medicalInfo: map['medicalInfo'],
+      doctorInfo: map['doctorInfo'],
       createdAt: map['createdAt'] ?? Timestamp.now(),
       updatedAt: map['updatedAt'] ?? Timestamp.now(),
     );
@@ -71,6 +75,7 @@ class UserModel {
     UserRole? role,
     String? profileImageUrl,
     Map<String, dynamic>? medicalInfo,
+    Map<String, dynamic>? doctorInfo,
     Timestamp? createdAt,
     Timestamp? updatedAt,
   }) {
@@ -82,6 +87,7 @@ class UserModel {
       role: role ?? this.role,
       profileImageUrl: profileImageUrl ?? this.profileImageUrl,
       medicalInfo: medicalInfo ?? this.medicalInfo,
+      doctorInfo: doctorInfo ?? this.doctorInfo,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

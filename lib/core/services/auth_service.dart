@@ -122,7 +122,7 @@ class AuthService extends ChangeNotifier {
       final userCredential = await _auth.signInWithCredential(credential);
       debugPrint("Firebase Auth credential successful. User ID: ${userCredential.user?.uid}");
       
-      // 4. Work with the authenticated user
+      // 4. Check if user exists in Firestore
       if (userCredential.user != null) {
         final user = userCredential.user!;
         
@@ -133,32 +133,7 @@ class AuthService extends ChangeNotifier {
         // 5. Check if user exists in Firestore
         final existingUser = await _firebaseService.getUserById(user.uid);
         
-        if (existingUser == null) {
-          debugPrint("Creating new user in Firestore");
-          // Create new user
-          final newUser = UserModel(
-            id: user.uid,
-            name: user.displayName ?? 'User',
-            email: user.email ?? '',
-            role: UserRole.patient, // Default to patient for Google sign-in
-            profileImageUrl: user.photoURL,
-            createdAt: Timestamp.now(),
-            updatedAt: Timestamp.now(),
-          );
-          
-          try {
-            // 6a. Create user in Firestore
-            await _firebaseService.createUser(newUser);
-            debugPrint("Successfully created user in Firestore");
-            _userModel = newUser;
-          } catch (e) {
-            debugPrint("Error creating user in Firestore: $e");
-            // Try a direct approach
-            await FirebaseFirestore.instance.collection('users').doc(user.uid).set(newUser.toMap());
-            debugPrint("Second attempt to create user completed");
-            _userModel = newUser;
-          }
-        } else {
+        if (existingUser != null) {
           debugPrint("User already exists in Firestore, updating last login");
           // Update existing user
           final updatedUser = existingUser.copyWith(
@@ -171,12 +146,14 @@ class AuthService extends ChangeNotifier {
             await _firebaseService.updateUser(updatedUser);
             debugPrint("Successfully updated user in Firestore");
             _userModel = updatedUser;
+            notifyListeners();
           } catch (e) {
             debugPrint("Error updating user in Firestore: $e");
           }
+        } else {
+          // For new users, let the login page handle role selection and user creation
+          debugPrint("New user detected. Login page will handle role selection.");
         }
-        
-        notifyListeners();
       } else {
         debugPrint("Warning: No user returned from Firebase Auth");
       }
@@ -233,17 +210,71 @@ class AuthService extends ChangeNotifier {
     
     // For patients, check if they have medical info
     if (_userModel!.role == UserRole.patient) {
-      return _userModel!.medicalInfo != null && 
-             _userModel!.phoneNumber != null && 
-             _userModel!.phoneNumber!.isNotEmpty;
+      final medicalInfo = _userModel!.medicalInfo;
+      
+      if (medicalInfo == null) return false;
+      
+      // Check essential fields in medicalInfo
+      final hasPhoneNumber = _userModel!.phoneNumber != null && _userModel!.phoneNumber!.isNotEmpty;
+      final hasDob = medicalInfo['dateOfBirth'] != null && medicalInfo['dateOfBirth'].isNotEmpty;
+      final hasGender = medicalInfo['gender'] != null && medicalInfo['gender'].isNotEmpty;
+      final hasHeight = medicalInfo['height'] != null;
+      final hasWeight = medicalInfo['weight'] != null;
+      final hasAddress = medicalInfo['address'] != null && medicalInfo['address'].isNotEmpty;
+      
+      return hasPhoneNumber && hasDob && hasGender && hasHeight && hasWeight && hasAddress;
     }
     
     // For doctors, check if they have specialty and phone number
     if (_userModel!.role == UserRole.doctor) {
-      return _userModel!.phoneNumber != null && 
-             _userModel!.phoneNumber!.isNotEmpty;
+      final hasPhoneNumber = _userModel!.phoneNumber != null && _userModel!.phoneNumber!.isNotEmpty;
+      final hasSpecialty = _userModel!.medicalInfo != null && 
+                          _userModel!.medicalInfo!['specialty'] != null && 
+                          _userModel!.medicalInfo!['specialty'].isNotEmpty;
+      
+      return hasPhoneNumber && hasSpecialty;
     }
     
     return false;
+  }
+  
+  // Update user role
+  Future<void> updateUserRole(String userId, UserRole role) async {
+    try {
+      // Get the current user data
+      final user = await _firebaseService.getUserById(userId);
+      
+      if (user != null) {
+        // Update the role
+        final updatedUser = user.copyWith(
+          role: role,
+          updatedAt: Timestamp.now(),
+        );
+        
+        // Save to Firestore
+        await _firebaseService.updateUser(updatedUser);
+        
+        // Update local model
+        _userModel = updatedUser;
+        notifyListeners();
+      } else {
+        throw Exception('User not found');
+      }
+    } catch (e) {
+      debugPrint('Error updating user role: $e');
+      rethrow;
+    }
+  }
+  
+  // Helper method to check if user is newly created
+  bool isNewlyCreatedUser() {
+    if (_userModel == null) return false;
+    
+    // Check if created and updated timestamps are very close (within 5 seconds)
+    final createdAt = _userModel!.createdAt.toDate();
+    final updatedAt = _userModel!.updatedAt.toDate();
+    final difference = updatedAt.difference(createdAt).inSeconds;
+    
+    return difference < 5;
   }
 } 

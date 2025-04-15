@@ -4,6 +4,7 @@ import 'package:medi_connect/core/config/routes.dart';
 import 'package:medi_connect/core/constants/app_colors.dart';
 import 'package:medi_connect/core/constants/app_typography.dart';
 import 'package:medi_connect/core/services/auth_service.dart';
+import 'package:medi_connect/core/models/user_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // Provider for the auth service
@@ -74,9 +75,17 @@ class _SplashPageState extends ConsumerState<SplashPage> with SingleTickerProvid
     final currentUser = authService.currentUser;
     
     if (currentUser != null) {
-      // User is logged in, navigate to home
+      // User is logged in, get user data to check role
+      final userModel = await authService.getCurrentUserData();
+      
       if (mounted) {
-        Navigator.of(context).pushReplacementNamed(Routes.home);
+        if (userModel?.role == UserRole.doctor) {
+          // Doctor user, navigate to doctor dashboard
+          Navigator.of(context).pushReplacementNamed(Routes.doctorDashboard);
+        } else {
+          // Patient user or undefined role, navigate to patient home
+          Navigator.of(context).pushReplacementNamed(Routes.home);
+        }
       }
     } else {
       // User is not logged in, navigate to login

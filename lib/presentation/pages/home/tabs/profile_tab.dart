@@ -7,7 +7,7 @@ import 'package:medi_connect/core/models/user_model.dart';
 import 'package:medi_connect/core/services/auth_service.dart';
 import 'package:medi_connect/core/services/firebase_service.dart';
 
-final userProvider = FutureProvider<UserModel?>((ref) async {
+final userProvider = FutureProvider.autoDispose<UserModel?>((ref) async {
   final authService = AuthService();
   final firebaseService = FirebaseService();
   final user = await authService.getCurrentUser();
@@ -17,226 +17,287 @@ final userProvider = FutureProvider<UserModel?>((ref) async {
   return null;
 });
 
-class ProfileTab extends ConsumerWidget {
+class ProfileTab extends ConsumerStatefulWidget {
   const ProfileTab({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ProfileTab> createState() => _ProfileTabState();
+}
+
+class _ProfileTabState extends ConsumerState<ProfileTab> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+  
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshUserData();
+    });
+  }
+  
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _refreshUserData();
+  }
+  
+  void _refreshUserData() {
+    ref.refresh(userProvider);
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
     final userAsyncValue = ref.watch(userProvider);
     
     return userAsyncValue.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (error, stackTrace) => Center(child: Text('Error loading profile: $error')),
+      error: (error, stackTrace) => Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('Error loading profile: $error'),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _refreshUserData,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
       data: (user) {
         if (user == null) {
-          return const Center(child: Text('User not found'));
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('User not found'),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: _refreshUserData,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          );
         }
         
         // Get medical info if available
         final medicalInfo = user.medicalInfo ?? {};
         
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Profile Header
-              _buildProfileHeader(user),
-              const SizedBox(height: 32),
-              
-              // Personal Info
-              _buildSection(
-                'Personal Information',
-                [
-                  _buildInfoItem(
-                    icon: Icons.person,
-                    title: 'Full Name',
-                    value: user.name,
-                  ),
-                  _buildInfoItem(
-                    icon: Icons.calendar_today,
-                    title: 'Date of Birth',
-                    value: medicalInfo['dateOfBirth'] ?? 'Not set',
-                  ),
-                  _buildInfoItem(
-                    icon: Icons.phone,
-                    title: 'Phone Number',
-                    value: user.phoneNumber ?? 'Not set',
-                  ),
-                  _buildInfoItem(
-                    icon: Icons.email,
-                    title: 'Email',
-                    value: user.email,
-                  ),
-                  _buildInfoItem(
-                    icon: Icons.home,
-                    title: 'Address',
-                    value: medicalInfo['address'] ?? 'Not set',
-                  ),
-                ],
-                onEditPressed: () {
-                  Navigator.of(context).pushNamed(Routes.patientProfile);
-                },
-              ),
-              const SizedBox(height: 24),
-              
-              // Medical Info
-              _buildSection(
-                'Medical Information',
-                [
-                  _buildInfoItem(
-                    icon: Icons.height,
-                    title: 'Height',
-                    value: medicalInfo['height'] != null ? '${medicalInfo['height']} cm' : 'Not set',
-                  ),
-                  _buildInfoItem(
-                    icon: Icons.monitor_weight,
-                    title: 'Weight',
-                    value: medicalInfo['weight'] != null ? '${medicalInfo['weight']} kg' : 'Not set',
-                  ),
-                  _buildInfoItem(
-                    icon: Icons.bloodtype,
-                    title: 'Blood Type',
-                    value: medicalInfo['bloodType'] ?? 'Not set',
-                  ),
-                  _buildInfoItem(
-                    icon: Icons.medication,
-                    title: 'Allergies',
-                    value: medicalInfo['allergies'] ?? 'None',
-                  ),
-                ],
-                onEditPressed: () {
-                  Navigator.of(context).pushNamed(Routes.patientProfile);
-                },
-              ),
-              const SizedBox(height: 24),
-              
-              // Settings
-              _buildSection(
-                'Settings',
-                [
-                  _buildSettingItem(
-                    icon: Icons.notifications,
-                    title: 'Notifications',
-                    trailing: Switch(
-                      value: true,
-                      onChanged: (value) {
-                        // TODO: Update notification settings
-                      },
-                      activeColor: AppColors.primary,
+        return RefreshIndicator(
+          onRefresh: () async {
+            _refreshUserData();
+          },
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Profile Header
+                _buildProfileHeader(user),
+                const SizedBox(height: 32),
+                
+                // Personal Info
+                _buildSection(
+                  'Personal Information',
+                  [
+                    _buildInfoItem(
+                      icon: Icons.person,
+                      title: 'Full Name',
+                      value: user.name,
                     ),
-                  ),
-                  _buildSettingItem(
-                    icon: Icons.lock,
-                    title: 'Privacy & Security',
-                    trailing: const Icon(
-                      Icons.arrow_forward_ios,
-                      size: 16,
-                      color: AppColors.textTertiary,
+                    _buildInfoItem(
+                      icon: Icons.calendar_today,
+                      title: 'Date of Birth',
+                      value: medicalInfo['dateOfBirth'] ?? 'Not set',
                     ),
-                    onTap: () {
-                      // TODO: Navigate to privacy settings
-                    },
-                  ),
-                  _buildSettingItem(
-                    icon: Icons.language,
-                    title: 'Language',
-                    subtitle: 'English',
-                    trailing: const Icon(
-                      Icons.arrow_forward_ios,
-                      size: 16,
-                      color: AppColors.textTertiary,
+                    _buildInfoItem(
+                      icon: Icons.phone,
+                      title: 'Phone Number',
+                      value: user.phoneNumber ?? 'Not set',
                     ),
-                    onTap: () {
-                      // TODO: Navigate to language settings
-                    },
-                  ),
-                  _buildSettingItem(
-                    icon: Icons.help_outline,
-                    title: 'Help & Support',
-                    trailing: const Icon(
-                      Icons.arrow_forward_ios,
-                      size: 16,
-                      color: AppColors.textTertiary,
+                    _buildInfoItem(
+                      icon: Icons.email,
+                      title: 'Email',
+                      value: user.email,
                     ),
-                    onTap: () {
-                      // TODO: Navigate to help & support
-                    },
-                  ),
-                  _buildSettingItem(
-                    icon: Icons.info_outline,
-                    title: 'About',
-                    trailing: const Icon(
-                      Icons.arrow_forward_ios,
-                      size: 16,
-                      color: AppColors.textTertiary,
+                    _buildInfoItem(
+                      icon: Icons.home,
+                      title: 'Address',
+                      value: medicalInfo['address'] ?? 'Not set',
                     ),
-                    onTap: () {
-                      // TODO: Navigate to about
-                    },
-                  ),
-                ],
-                showEditButton: false,
-              ),
-              const SizedBox(height: 24),
-              
-              // Developer Section
-              _buildSection(
-                'Developer',
-                [
-                  _buildSettingItem(
-                    icon: Icons.health_and_safety,
-                    title: 'Health Icons',
-                    subtitle: 'View available health icons',
-                    trailing: const Icon(
-                      Icons.arrow_forward_ios,
-                      size: 16,
-                      color: AppColors.textTertiary,
-                    ),
-                    onTap: () {
-                      Navigator.of(context).pushNamed(Routes.healthIcons);
-                    },
-                  ),
-                ],
-                showEditButton: false,
-              ),
-              const SizedBox(height: 24),
-              
-              // Logout Button
-              Center(
-                child: TextButton.icon(
-                  onPressed: () async {
-                    await AuthService().signOut();
-                    if (context.mounted) {
-                      Navigator.of(context).pushReplacementNamed(Routes.login);
-                    }
+                  ],
+                  onEditPressed: () {
+                    Navigator.of(context).pushNamed(Routes.patientProfile).then((_) {
+                      _refreshUserData();
+                    });
                   },
-                  icon: const Icon(
-                    Icons.logout,
-                    color: AppColors.error,
-                  ),
-                  label: Text(
-                    'Logout',
-                    style: AppTypography.bodyLarge.copyWith(
+                ),
+                const SizedBox(height: 24),
+                
+                // Medical Info
+                _buildSection(
+                  'Medical Information',
+                  [
+                    _buildInfoItem(
+                      icon: Icons.height,
+                      title: 'Height',
+                      value: medicalInfo['height'] != null ? '${medicalInfo['height']} cm' : 'Not set',
+                    ),
+                    _buildInfoItem(
+                      icon: Icons.monitor_weight,
+                      title: 'Weight',
+                      value: medicalInfo['weight'] != null ? '${medicalInfo['weight']} kg' : 'Not set',
+                    ),
+                    _buildInfoItem(
+                      icon: Icons.bloodtype,
+                      title: 'Blood Type',
+                      value: medicalInfo['bloodType'] ?? 'Not set',
+                    ),
+                    _buildInfoItem(
+                      icon: Icons.medication,
+                      title: 'Allergies',
+                      value: medicalInfo['allergies'] ?? 'None',
+                    ),
+                  ],
+                  onEditPressed: () {
+                    Navigator.of(context).pushNamed(Routes.patientProfile).then((_) {
+                      _refreshUserData();
+                    });
+                  },
+                ),
+                const SizedBox(height: 24),
+                
+                // Settings
+                _buildSection(
+                  'Settings',
+                  [
+                    _buildSettingItem(
+                      icon: Icons.notifications,
+                      title: 'Notifications',
+                      trailing: Switch(
+                        value: true,
+                        onChanged: (value) {
+                          // TODO: Update notification settings
+                        },
+                        activeColor: AppColors.primary,
+                      ),
+                    ),
+                    _buildSettingItem(
+                      icon: Icons.lock,
+                      title: 'Privacy & Security',
+                      trailing: const Icon(
+                        Icons.arrow_forward_ios,
+                        size: 16,
+                        color: AppColors.textTertiary,
+                      ),
+                      onTap: () {
+                        // TODO: Navigate to privacy settings
+                      },
+                    ),
+                    _buildSettingItem(
+                      icon: Icons.language,
+                      title: 'Language',
+                      subtitle: 'English',
+                      trailing: const Icon(
+                        Icons.arrow_forward_ios,
+                        size: 16,
+                        color: AppColors.textTertiary,
+                      ),
+                      onTap: () {
+                        // TODO: Navigate to language settings
+                      },
+                    ),
+                    _buildSettingItem(
+                      icon: Icons.help_outline,
+                      title: 'Help & Support',
+                      trailing: const Icon(
+                        Icons.arrow_forward_ios,
+                        size: 16,
+                        color: AppColors.textTertiary,
+                      ),
+                      onTap: () {
+                        // TODO: Navigate to help & support
+                      },
+                    ),
+                    _buildSettingItem(
+                      icon: Icons.info_outline,
+                      title: 'About',
+                      trailing: const Icon(
+                        Icons.arrow_forward_ios,
+                        size: 16,
+                        color: AppColors.textTertiary,
+                      ),
+                      onTap: () {
+                        // TODO: Navigate to about
+                      },
+                    ),
+                  ],
+                  showEditButton: false,
+                ),
+                const SizedBox(height: 24),
+                
+                // Developer Section
+                _buildSection(
+                  'Developer',
+                  [
+                    _buildSettingItem(
+                      icon: Icons.health_and_safety,
+                      title: 'Health Icons',
+                      subtitle: 'View available health icons',
+                      trailing: const Icon(
+                        Icons.arrow_forward_ios,
+                        size: 16,
+                        color: AppColors.textTertiary,
+                      ),
+                      onTap: () {
+                        Navigator.of(context).pushNamed(Routes.healthIcons);
+                      },
+                    ),
+                  ],
+                  showEditButton: false,
+                ),
+                const SizedBox(height: 24),
+                
+                // Logout Button
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () async {
+                      await AuthService().signOut();
+                      if (context.mounted) {
+                        Navigator.of(context).pushReplacementNamed(Routes.login);
+                      }
+                    },
+                    icon: const Icon(
+                      Icons.logout,
                       color: AppColors.error,
-                      fontWeight: FontWeight.w600,
+                    ),
+                    label: Text(
+                      'Logout',
+                      style: AppTypography.bodyLarge.copyWith(
+                        color: AppColors.error,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 32),
-              
-              // App Version
-              Center(
-                child: Text(
-                  'MediConnect v1.0.0',
-                  style: AppTypography.bodySmall.copyWith(
-                    color: AppColors.textTertiary,
+                const SizedBox(height: 32),
+                
+                // App Version
+                Center(
+                  child: Text(
+                    'MediConnect v1.0.0',
+                    style: AppTypography.bodySmall.copyWith(
+                      color: AppColors.textTertiary,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-            ],
+                const SizedBox(height: 16),
+              ],
+            ),
           ),
         );
       },

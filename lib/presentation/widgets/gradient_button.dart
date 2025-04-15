@@ -17,8 +17,8 @@ class GradientButton extends StatelessWidget {
     required this.text,
     required this.onPressed,
     this.width,
-    this.height = 54,
-    this.borderRadius = 12,
+    this.height = 56,
+    this.borderRadius = 28,
     this.gradientColors,
     this.padding,
     this.icon,
@@ -27,8 +27,8 @@ class GradientButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final defaultGradient = [
-      AppColors.primary,
-      AppColors.primaryDark,
+      AppColors.primary, // Blue
+      AppColors.primaryLight, // Light blue
     ];
     
     return Container(
@@ -37,44 +37,47 @@ class GradientButton extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: gradientColors ?? defaultGradient,
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(borderRadius),
         boxShadow: [
           BoxShadow(
-            color: AppColors.primary.withOpacity(0.3),
-            blurRadius: 8,
+            color: (gradientColors?.first ?? defaultGradient.first).withOpacity(0.25),
+            blurRadius: 12,
+            spreadRadius: 0,
             offset: const Offset(0, 4),
           ),
         ],
       ),
-      child: ElevatedButton(
-        onPressed: onPressed,
-        style: ElevatedButton.styleFrom(
-          padding: padding ?? const EdgeInsets.symmetric(horizontal: 16),
-          backgroundColor: Colors.transparent,
-          shadowColor: Colors.transparent,
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(borderRadius),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (icon != null) ...[
-              icon!,
-              const SizedBox(width: 12),
-            ],
-            Text(
-              text,
-              style: AppTypography.buttonLarge.copyWith(
-                color: Colors.white,
-              ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(borderRadius),
+          splashColor: Colors.white.withOpacity(0.2),
+          highlightColor: Colors.transparent,
+          onTap: onPressed,
+          child: Padding(
+            padding: padding ?? const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (icon != null) ...[
+                  icon!,
+                  const SizedBox(width: 12),
+                ],
+                Text(
+                  text,
+                  style: AppTypography.buttonLarge.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

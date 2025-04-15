@@ -2,17 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:medi_connect/core/constants/app_colors.dart';
 import 'package:medi_connect/core/constants/app_typography.dart';
-import 'package:intl/intl.dart';
 import 'package:medi_connect/core/models/appointment_model.dart';
-import 'package:medi_connect/core/services/firebase_service.dart';
 import 'package:medi_connect/core/services/auth_service.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:medi_connect/core/services/firebase_service.dart';
+import 'package:medi_connect/core/config/routes.dart';
+import 'package:intl/intl.dart';
 
 // Providers
-final firebaseServiceProvider = Provider<FirebaseService>((ref) => FirebaseService());
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
+final firebaseServiceProvider = Provider<FirebaseService>((ref) => FirebaseService());
 
-final upcomingAppointmentsProvider = FutureProvider<List<AppointmentModel>>((ref) async {
+final upcomingAppointmentsProvider = FutureProvider.autoDispose<List<AppointmentModel>>((ref) async {
   final authService = ref.read(authServiceProvider);
   final firebaseService = ref.read(firebaseServiceProvider);
   final user = await authService.getCurrentUser();
@@ -21,7 +21,7 @@ final upcomingAppointmentsProvider = FutureProvider<List<AppointmentModel>>((ref
   return await firebaseService.getUpcomingAppointments(user.uid, false);
 });
 
-final pastAppointmentsProvider = FutureProvider<List<AppointmentModel>>((ref) async {
+final pastAppointmentsProvider = FutureProvider.autoDispose<List<AppointmentModel>>((ref) async {
   final authService = ref.read(authServiceProvider);
   final firebaseService = ref.read(firebaseServiceProvider);
   final user = await authService.getCurrentUser();
@@ -30,7 +30,7 @@ final pastAppointmentsProvider = FutureProvider<List<AppointmentModel>>((ref) as
   return await firebaseService.getPastAppointments(user.uid, false);
 });
 
-final cancelledAppointmentsProvider = FutureProvider<List<AppointmentModel>>((ref) async {
+final cancelledAppointmentsProvider = FutureProvider.autoDispose<List<AppointmentModel>>((ref) async {
   final authService = ref.read(authServiceProvider);
   final firebaseService = ref.read(firebaseServiceProvider);
   final user = await authService.getCurrentUser();
@@ -46,73 +46,131 @@ class AppointmentsTab extends ConsumerStatefulWidget {
   ConsumerState<AppointmentsTab> createState() => _AppointmentsTabState();
 }
 
-class _AppointmentsTabState extends ConsumerState<AppointmentsTab> with SingleTickerProviderStateMixin {
+class _AppointmentsTabState extends ConsumerState<AppointmentsTab> with TickerProviderStateMixin {
   late TabController _tabController;
-  final List<String> _tabLabels = ['Upcoming', 'Past', 'Cancelled'];
   DateTime _selectedDate = DateTime.now();
+  late List<DateTime> _calendarDates;
+  final ScrollController _scrollController = ScrollController();
   
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: _tabLabels.length, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) {
+        _refreshData();
+      }
+    });
+    
+    // Initialize calendar dates
+    _generateCalendarDates();
+    
+    // Initial data load
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshData();
+      // Scroll to today's date
+      _scrollToSelectedDate();
+    });
   }
   
-  void _refreshAppointments() {
-    ref.refresh(upcomingAppointmentsProvider);
-    ref.refresh(pastAppointmentsProvider);
-    ref.refresh(cancelledAppointmentsProvider);
+  void _generateCalendarDates() {
+    // Generate dates from 30 days in the past to 90 days in the future
+    final DateTime startDate = DateTime.now().subtract(const Duration(days: 30));
+    final DateTime endDate = DateTime.now().add(const Duration(days: 90));
+    
+    _calendarDates = [];
+    for (DateTime date = startDate; date.isBefore(endDate); date = date.add(const Duration(days: 1))) {
+      _calendarDates.add(DateTime(date.year, date.month, date.day));
+    }
   }
   
+  void _scrollToSelectedDate() {
+    // Find index of today's date
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    
+    final index = _calendarDates.indexWhere((date) => 
+      date.year == today.year && 
+      date.month == today.month && 
+      date.day == today.day
+    );
+    
+    if (index != -1) {
+      // Scroll to today with some padding
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            (index * 70.0) - 100.0, // 70 is the width of each date item + padding
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          );
+        }
+      });
+    }
+  }
+  
+  void _refreshData() {
+    switch (_tabController.index) {
+      case 0:
+        ref.refresh(upcomingAppointmentsProvider);
+        break;
+      case 1:
+        ref.refresh(pastAppointmentsProvider);
+        break;
+      case 2:
+        ref.refresh(cancelledAppointmentsProvider);
+        break;
+    }
+  }
+  
+  void _onDateSelected(DateTime date) {
+    setState(() {
+      _selectedDate = date;
+    });
+    _refreshData();
+  }
+
   @override
   void dispose() {
     _tabController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
-  
+
   @override
   Widget build(BuildContext context) {
-    return RefreshIndicator(
-      onRefresh: () async {
-        _refreshAppointments();
-      },
-      child: Column(
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Column(
         children: [
           // Calendar Strip
-          _buildCalendarStrip(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: _buildCalendarStrip(),
+          ),
+          const SizedBox(height: 16),
           
-          // Tabs
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(
-                bottom: BorderSide(
-                  color: AppColors.surfaceDark,
-                  width: 1,
-                ),
-              ),
-            ),
-            child: TabBar(
-              controller: _tabController,
-              labelColor: AppColors.primary,
-              unselectedLabelColor: AppColors.textSecondary,
-              labelStyle: AppTypography.bodyMedium.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-              unselectedLabelStyle: AppTypography.bodyMedium,
-              indicatorColor: AppColors.primary,
-              indicatorWeight: 3,
-              tabs: _tabLabels.map((label) => Tab(text: label)).toList(),
-            ),
+          // Tab Bar
+          TabBar(
+            controller: _tabController,
+            labelColor: AppColors.primary,
+            unselectedLabelColor: Colors.grey,
+            indicatorColor: AppColors.primary,
+            tabs: const [
+              Tab(text: 'Upcoming'),
+              Tab(text: 'Past'),
+              Tab(text: 'Cancelled'),
+            ],
           ),
           
-          // Tab Content
+          // Tab Bar View
           Expanded(
             child: TabBarView(
               controller: _tabController,
               children: [
-                _buildUpcomingAppointments(),
-                _buildPastAppointments(),
-                _buildCancelledAppointments(),
+                _buildAppointmentList(0),
+                _buildAppointmentList(1),
+                _buildAppointmentList(2),
               ],
             ),
           ),
@@ -120,481 +178,519 @@ class _AppointmentsTabState extends ConsumerState<AppointmentsTab> with SingleTi
       ),
     );
   }
-  
+
   Widget _buildCalendarStrip() {
-    final now = DateTime.now();
-    final days = List.generate(7, (index) {
-      return now.add(Duration(days: index));
-    });
-    
     return Container(
       height: 100,
-      color: Colors.white,
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: days.length,
-        itemBuilder: (context, index) {
-          final day = days[index];
-          final isToday = day.day == now.day && day.month == now.month && day.year == now.year;
-          final isSelected = day.day == _selectedDate.day && 
-                          day.month == _selectedDate.month && 
-                          day.year == _selectedDate.year;
-          
-          // Get appointment count for this day from the appointments data
-          final upcomingAppointments = ref.watch(upcomingAppointmentsProvider);
-          int appointmentCount = 0;
-          
-          upcomingAppointments.whenData((appointments) {
-            appointmentCount = appointments.where((apt) {
-              final aptDate = apt.date.toDate();
-              return aptDate.day == day.day && 
-                     aptDate.month == day.month && 
-                     aptDate.year == day.year;
-            }).length;
-          });
-          
-          return GestureDetector(
-            onTap: () {
-              setState(() {
-                _selectedDate = day;
-              });
-            },
-            child: Container(
-              width: 60,
-              margin: const EdgeInsets.symmetric(horizontal: 8),
-              decoration: BoxDecoration(
-                color: isSelected 
-                  ? AppColors.primary.withOpacity(0.1)
-                  : Colors.transparent,
-                borderRadius: BorderRadius.circular(12),
-                border: isSelected
-                  ? Border.all(color: AppColors.primary, width: 2)
-                  : null,
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    DateFormat('EEE').format(day).toUpperCase(),
-                    style: AppTypography.bodySmall.copyWith(
-                      color: isSelected ? AppColors.primary : AppColors.textSecondary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: isToday ? AppColors.primary : Colors.transparent,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Center(
-                      child: Text(
-                        day.day.toString(),
-                        style: AppTypography.bodyMedium.copyWith(
-                          color: isToday ? Colors.white : AppColors.textPrimary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  if (appointmentCount > 0)
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-  
-  Widget _buildUpcomingAppointments() {
-    final upcomingAppointmentsAsync = ref.watch(upcomingAppointmentsProvider);
-    
-    return upcomingAppointmentsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (error, stackTrace) => Center(
-        child: Text('Error loading appointments: $error'),
-      ),
-      data: (appointments) {
-        // Filter appointments by selected date if needed
-        final filteredAppointments = _selectedDate != null 
-            ? appointments.where((apt) {
-                final aptDate = apt.date.toDate();
-                return aptDate.day == _selectedDate.day && 
-                       aptDate.month == _selectedDate.month && 
-                       aptDate.year == _selectedDate.year;
-              }).toList()
-            : appointments;
-        
-        return filteredAppointments.isEmpty
-          ? _buildEmptyState('No upcoming appointments', 'Schedule a new appointment with your doctor')
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: filteredAppointments.length,
-              itemBuilder: (context, index) {
-                return _buildAppointmentCard(filteredAppointments[index]);
-              },
-            );
-      },
-    );
-  }
-  
-  Widget _buildPastAppointments() {
-    final pastAppointmentsAsync = ref.watch(pastAppointmentsProvider);
-    
-    return pastAppointmentsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (error, stackTrace) => Center(
-        child: Text('Error loading appointments: $error'),
-      ),
-      data: (appointments) {
-        return appointments.isEmpty
-          ? _buildEmptyState('No past appointments', 'Your appointment history will appear here')
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: appointments.length,
-              itemBuilder: (context, index) {
-                return _buildAppointmentCard(appointments[index], isPast: true);
-              },
-            );
-      },
-    );
-  }
-  
-  Widget _buildCancelledAppointments() {
-    final cancelledAppointmentsAsync = ref.watch(cancelledAppointmentsProvider);
-    
-    return cancelledAppointmentsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (error, stackTrace) => Center(
-        child: Text('Error loading appointments: $error'),
-      ),
-      data: (appointments) {
-        return appointments.isEmpty
-          ? _buildEmptyState('No cancelled appointments', 'Cancelled appointments will appear here')
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: appointments.length,
-              itemBuilder: (context, index) {
-                return _buildAppointmentCard(appointments[index], isCancelled: true);
-              },
-            );
-      },
-    );
-  }
-  
-  Widget _buildAppointmentCard(AppointmentModel appointment, {bool isPast = false, bool isCancelled = false}) {
-    // Format date
-    final appointmentDate = appointment.date.toDate();
-    final isToday = DateFormat('yyyy-MM-dd').format(appointmentDate) == DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final formattedDate = isToday
-        ? 'Today, ${DateFormat('MMM d').format(appointmentDate)}'
-        : DateFormat('EEEE, MMM d').format(appointmentDate);
-    
-    // Get doctor info from appointment
-    final doctorName = appointment.doctorDetails?['name'] ?? 'Doctor';
-    final doctorSpecialty = appointment.doctorDetails?['specialty'] ?? 'Specialist';
-    final appointmentLocation = appointment.location ?? 'Medical Center';
-    final isVideo = appointment.type == AppointmentType.video;
-    
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  radius: 28,
-                  backgroundColor: AppColors.primary.withOpacity(0.1),
-                  child: Text(
-                    doctorName.toString().split(' ').map((e) => e.isEmpty ? '' : e[0]).join(),
-                    style: AppTypography.headlineSmall.copyWith(
-                      color: AppColors.primary,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        doctorName,
-                        style: AppTypography.bodyLarge.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      Text(
-                        doctorSpecialty,
-                        style: AppTypography.bodyMedium.copyWith(
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.calendar_today,
-                            size: 16,
-                            color: isPast || isCancelled
-                                ? AppColors.textTertiary
-                                : AppColors.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            formattedDate,
-                            style: AppTypography.bodyMedium,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.access_time,
-                            size: 16,
-                            color: isPast || isCancelled
-                                ? AppColors.textTertiary
-                                : AppColors.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            appointment.time,
-                            style: AppTypography.bodyMedium,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Icon(
-                            isVideo
-                                ? Icons.videocam
-                                : Icons.location_on,
-                            size: 16,
-                            color: isPast || isCancelled
-                                ? AppColors.textTertiary
-                                : AppColors.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            isVideo
-                                ? 'Video Consultation'
-                                : appointmentLocation,
-                            style: AppTypography.bodyMedium,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: Text(
+              DateFormat('MMMM yyyy').format(_selectedDate),
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
-          if (!isPast && !isCancelled)
-            Container(
-              decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(
-                    color: AppColors.surfaceDark,
-                    width: 1,
-                  ),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: InkWell(
-                      onTap: () {
-                        // TODO: Reschedule appointment
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.calendar_month,
-                              size: 20,
-                              color: AppColors.textSecondary,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Reschedule',
-                              style: AppTypography.bodyMedium.copyWith(
-                                color: AppColors.textSecondary,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
+          Expanded(
+            child: ListView.builder(
+              controller: _scrollController,
+              scrollDirection: Axis.horizontal,
+              itemCount: _calendarDates.length,
+              itemBuilder: (context, index) {
+                final date = _calendarDates[index];
+                final isSelected = date.day == _selectedDate.day && 
+                              date.month == _selectedDate.month && 
+                              date.year == _selectedDate.year;
+                final isToday = date.day == DateTime.now().day && 
+                            date.month == DateTime.now().month && 
+                            date.year == DateTime.now().year;
+                
+                return GestureDetector(
+                  onTap: () => _onDateSelected(date),
+                  child: Container(
+                    width: 60,
+                    margin: const EdgeInsets.symmetric(horizontal: 5.0),
+                    decoration: BoxDecoration(
+                      color: isSelected ? AppColors.primary : Colors.transparent,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          DateFormat('E').format(date).toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isSelected ? Colors.white : 
+                                  isToday ? AppColors.primary : Colors.grey,
+                            fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 5),
+                        Text(
+                          date.day.toString(),
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: isSelected ? Colors.white : 
+                                  isToday ? AppColors.primary : Colors.black,
+                            fontWeight: isSelected || isToday ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  Container(
-                    width: 1,
-                    height: 44,
-                    color: AppColors.surfaceDark,
-                  ),
-                  Expanded(
-                    child: InkWell(
-                      onTap: () {
-                        // TODO: Cancel appointment
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.close,
-                              size: 20,
-                              color: AppColors.error,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Cancel',
-                              style: AppTypography.bodyMedium.copyWith(
-                                color: AppColors.error,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else if (isPast)
-            Container(
-              decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(
-                    color: AppColors.surfaceDark,
-                    width: 1,
-                  ),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: InkWell(
-                      onTap: () {
-                        // TODO: View details
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.description_outlined,
-                              size: 20,
-                              color: AppColors.primary,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'View Summary',
-                              style: AppTypography.bodyMedium.copyWith(
-                                color: AppColors.primary,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  Container(
-                    width: 1,
-                    height: 44,
-                    color: AppColors.surfaceDark,
-                  ),
-                  Expanded(
-                    child: InkWell(
-                      onTap: () {
-                        // TODO: Book follow-up
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.add_circle_outline,
-                              size: 20,
-                              color: AppColors.secondary,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Book Follow-up',
-                              style: AppTypography.bodyMedium.copyWith(
-                                color: AppColors.secondary,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                );
+              },
             ),
+          ),
         ],
       ),
     );
   }
-  
-  Widget _buildEmptyState(String title, String subtitle) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32.0),
+
+  Widget _buildAppointmentList(int tabIndex) {
+    final provider = tabIndex == 0 
+        ? upcomingAppointmentsProvider 
+        : tabIndex == 1 
+            ? pastAppointmentsProvider 
+            : cancelledAppointmentsProvider;
+    
+    return ref.watch(provider).when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, stack) => Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.calendar_today,
-              size: 80,
-              color: AppColors.surfaceDark,
-            ),
-            const SizedBox(height: 24),
-            Text(
-              title,
-              style: AppTypography.headlineSmall,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              subtitle,
-              style: AppTypography.bodyMedium.copyWith(
-                color: AppColors.textSecondary,
-              ),
-              textAlign: TextAlign.center,
+            const Icon(Icons.error_outline, size: 48, color: AppColors.error),
+            const SizedBox(height: 16),
+            Text('Error loading appointments: $error'),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _refreshData,
+              child: const Text('Retry'),
             ),
           ],
         ),
       ),
+      data: (appointments) {
+        // Filter appointments by selected date if needed
+        final filteredAppointments = tabIndex == 0
+            ? appointments.where((appointment) {
+                final appointmentDate = appointment.date.toDate();
+                return appointmentDate.day == _selectedDate.day &&
+                       appointmentDate.month == _selectedDate.month &&
+                       appointmentDate.year == _selectedDate.year;
+              }).toList()
+            : appointments;
+            
+        if (filteredAppointments.isEmpty) {
+          return _buildEmptyState(tabIndex);
+        }
+        
+        // Sort appointments by date (newest first for past, soonest first for upcoming)
+        filteredAppointments.sort((a, b) => tabIndex == 1
+            ? b.date.compareTo(a.date)  // Past - newest first
+            : a.date.compareTo(b.date)); // Upcoming - soonest first
+        
+        return RefreshIndicator(
+          onRefresh: () async {
+            _refreshData();
+          },
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: filteredAppointments.length,
+            itemBuilder: (context, index) {
+              return _buildAppointmentCard(filteredAppointments[index]);
+            },
+          ),
+        );
+      },
     );
+  }
+
+  Widget _buildEmptyState(int tabIndex) {
+    String message;
+    IconData icon;
+    
+    switch (tabIndex) {
+      case 0:
+        message = 'No upcoming appointments for this date';
+        icon = Icons.event_available;
+        break;
+      case 1:
+        message = 'No past appointments';
+        icon = Icons.history;
+        break;
+      case 2:
+        message = 'No cancelled appointments';
+        icon = Icons.event_busy;
+        break;
+      default:
+        message = 'No appointments found';
+        icon = Icons.calendar_today;
+    }
+    
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 64, color: Colors.grey.shade400),
+          const SizedBox(height: 16),
+          Text(
+            message,
+            style: AppTypography.bodyLarge.copyWith(
+              color: Colors.grey.shade600,
+            ),
+          ),
+          const SizedBox(height: 24),
+          if (tabIndex == 0)
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 32),
+              child: Material(
+                elevation: 4,
+                shadowColor: AppColors.primary.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(16),
+                child: InkWell(
+                  onTap: () => _navigateToBookAppointment(),
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          AppColors.primary,
+                          AppColors.primary.withBlue(255),
+                        ],
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    width: double.infinity,
+                    alignment: Alignment.center,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.add_circle_outline,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Book Appointment',
+                          style: AppTypography.bodyLarge.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // Navigate to book appointment page
+  void _navigateToBookAppointment() {
+    Navigator.of(context).pushNamed(Routes.bookAppointment).then((_) {
+      _refreshData(); // Refresh data when returning from booking page
+    });
+  }
+
+  Widget _buildAppointmentCard(AppointmentModel appointment) {
+    final appointmentDate = appointment.date.toDate();
+    final dayFormat = DateFormat('E, MMM d');
+    final timeFormat = DateFormat('h:mm a');
+    
+    // Get doctor details
+    String doctorName = 'Doctor';
+    String doctorSpecialty = 'Medical Professional';
+    String? doctorImageUrl;
+    
+    if (appointment.doctorDetails != null) {
+      if (appointment.doctorDetails!['name'] != null) {
+        doctorName = 'Dr. ${appointment.doctorDetails!['name']}';
+      }
+      if (appointment.doctorDetails!['specialty'] != null) {
+        doctorSpecialty = appointment.doctorDetails!['specialty'];
+      }
+      if (appointment.doctorDetails!['profileImageUrl'] != null) {
+        doctorImageUrl = appointment.doctorDetails!['profileImageUrl'];
+      }
+    }
+    
+    // Status color based on appointment status
+    Color statusColor;
+    switch (appointment.status) {
+      case AppointmentStatus.upcoming:
+        statusColor = AppColors.primary;
+        break;
+      case AppointmentStatus.past:
+        statusColor = AppColors.success;
+        break;
+      case AppointmentStatus.cancelled:
+        statusColor = AppColors.error;
+        break;
+      default:
+        statusColor = AppColors.primary;
+    }
+    
+    // Type icon based on appointment type
+    IconData typeIcon;
+    String typeText;
+    switch (appointment.type) {
+      case AppointmentType.video:
+        typeIcon = Icons.videocam_outlined;
+        typeText = 'Video Call';
+        break;
+      case AppointmentType.inPerson:
+        typeIcon = Icons.local_hospital_outlined;
+        typeText = 'In-Person';
+        break;
+      default:
+        typeIcon = Icons.local_hospital_outlined;
+        typeText = 'In-Person';
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: InkWell(
+        onTap: () {
+          // TODO: Navigate to appointment details
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  // Doctor Avatar
+                  doctorImageUrl != null
+                      ? CircleAvatar(
+                          radius: 24,
+                          backgroundImage: NetworkImage(doctorImageUrl),
+                        )
+                      : CircleAvatar(
+                          radius: 24,
+                          backgroundColor: AppColors.primary.withOpacity(0.1),
+                          child: const Icon(
+                            Icons.person,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                  const SizedBox(width: 16),
+                  
+                  // Doctor Info
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          doctorName,
+                          style: AppTypography.bodyLarge.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          doctorSpecialty,
+                          style: AppTypography.bodyMedium.copyWith(
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  // Appointment Type
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: statusColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          typeIcon,
+                          size: 16,
+                          color: statusColor,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          typeText,
+                          style: AppTypography.bodySmall.copyWith(
+                            color: statusColor,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              
+              const Divider(height: 24),
+              
+              // Appointment Details
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _buildDetailItem(
+                    Icons.calendar_today,
+                    'Date',
+                    dayFormat.format(appointmentDate),
+                  ),
+                  _buildDetailItem(
+                    Icons.access_time,
+                    'Time',
+                    timeFormat.format(appointmentDate),
+                  ),
+                  _buildDetailItem(
+                    Icons.timelapse,
+                    'Duration',
+                    '30 mins',
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Action Buttons
+              if (_tabController.index == 0)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    OutlinedButton(
+                      onPressed: () {
+                        _showCancelDialog(appointment);
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.error,
+                        side: const BorderSide(color: AppColors.error),
+                      ),
+                      child: const Text('Cancel'),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton(
+                      onPressed: () {
+                        // TODO: Navigate to reschedule page
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: appointment.type == AppointmentType.video
+                          ? const Text('Join Call')
+                          : const Text('View Details'),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailItem(IconData icon, String label, String value) {
+    return Column(
+      children: [
+        Icon(
+          icon,
+          color: AppColors.primary,
+          size: 22,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          label,
+          style: AppTypography.bodySmall.copyWith(
+            color: Colors.grey.shade600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: AppTypography.bodyMedium.copyWith(
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+  
+  void _showCancelDialog(AppointmentModel appointment) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel Appointment'),
+        content: const Text(
+          'Are you sure you want to cancel this appointment? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('No, Keep it'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _cancelAppointment(appointment);
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.error,
+            ),
+            child: const Text('Yes, Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Future<void> _cancelAppointment(AppointmentModel appointment) async {
+    try {
+      final firebaseService = ref.read(firebaseServiceProvider);
+      
+      // Update appointment status
+      final updatedAppointment = appointment.copyWith(
+        status: AppointmentStatus.cancelled,
+      );
+      
+      await firebaseService.updateAppointment(updatedAppointment);
+      
+      // Refresh data
+      _refreshData();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Appointment cancelled successfully'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to cancel appointment: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
   }
 } 

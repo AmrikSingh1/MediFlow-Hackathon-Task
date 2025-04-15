@@ -8,6 +8,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:medi_connect/core/services/firebase_service.dart';
 import 'package:medi_connect/core/services/auth_service.dart';
+import 'package:medi_connect/firebase_options.dart';
 
 // Providers
 final firebaseServiceProvider = Provider<FirebaseService>((ref) {
@@ -27,7 +28,9 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   // Initialize Firebase
-  await Firebase.initializeApp();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   
   // Load environment variables
   await dotenv.load(fileName: ".env");

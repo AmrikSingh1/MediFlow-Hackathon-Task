@@ -5,6 +5,7 @@ import 'package:medi_connect/core/constants/app_typography.dart';
 import 'package:medi_connect/presentation/widgets/gradient_button.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:lottie/lottie.dart';
 
 class OnboardingPage extends ConsumerStatefulWidget {
   const OnboardingPage({super.key});
@@ -21,17 +22,17 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
     {
       'title': 'Smart Health Interactions',
       'description': 'Enhance communication between doctors and patients with AI-powered assistance for better healthcare outcomes.',
-      'image': 'assets/images/onboarding1.png',
+      'animation': 'assets/lottie/Doctor-Patient Connection.json',
     },
     {
       'title': 'Intelligent Data Collection',
       'description': 'Pre-anamnesis chatbot collects accurate patient information before consultations, saving time for everyone.',
-      'image': 'assets/images/onboarding2.png',
+      'animation': 'assets/lottie/AI-Chatbot.json',
     },
     {
-      'title': 'Secure Communication',
+      'title': 'Secure Medical Scheduling',
       'description': 'GDPR compliant platform ensuring your health data remains private and secure at all times.',
-      'image': 'assets/images/onboarding3.png',
+      'animation': 'assets/lottie/Medical-Appointment-Scheduling.json',
     },
   ];
 
@@ -88,7 +89,7 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
                   return _buildPage(
                     title: _onboardingData[index]['title'] ?? '',
                     description: _onboardingData[index]['description'] ?? '',
-                    imagePath: _onboardingData[index]['image'] ?? '',
+                    animationPath: _onboardingData[index]['animation'] ?? '',
                   );
                 },
               ),
@@ -147,27 +148,26 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
   Widget _buildPage({
     required String title,
     required String description,
-    required String imagePath,
+    required String animationPath,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24.0),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Image placeholder - replace with actual images
+          // Lottie animation
           Container(
             height: 280,
             width: double.infinity,
             decoration: BoxDecoration(
-              color: AppColors.surfaceMedium,
+              color: Colors.white,
               borderRadius: BorderRadius.circular(16.0),
             ),
-            child: Center(
-              child: Icon(
-                _getIconForIndex(_currentPage),
-                size: 100,
-                color: AppColors.primary,
-              ),
+            child: Lottie.asset(
+              animationPath,
+              fit: BoxFit.contain,
+              repeat: true,
+              animate: true,
             ),
           ),
           const SizedBox(height: 48),
@@ -201,18 +201,5 @@ class _OnboardingPageState extends ConsumerState<OnboardingPage> {
         borderRadius: BorderRadius.circular(4),
       ),
     );
-  }
-  
-  IconData _getIconForIndex(int index) {
-    switch (index) {
-      case 0:
-        return Icons.health_and_safety_rounded;
-      case 1:
-        return Icons.chat_rounded;
-      case 2:
-        return Icons.security_rounded;
-      default:
-        return Icons.medical_services_rounded;
-    }
   }
 } 
