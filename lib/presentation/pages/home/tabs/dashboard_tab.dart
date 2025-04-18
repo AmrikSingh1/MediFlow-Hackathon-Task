@@ -409,56 +409,60 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
           bottomRight: Radius.circular(24),
         ),
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            // Navigate to search page
-            Navigator.pushNamed(context, Routes.findDoctor);
-          },
-          splashColor: Colors.white.withOpacity(0.1),
-          highlightColor: Colors.white.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(30),
-          child: Ink(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(30),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, 3),
+      child: GestureDetector(
+        onTap: () {
+          // Navigate to search page
+          Navigator.pushNamed(context, Routes.findDoctor);
+        },
+        behavior: HitTestBehavior.opaque, // Ensures the entire area is clickable
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(30),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.search,
+                  color: Colors.grey,
+                  size: 22,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: AnimatedTextKit(
+                    animatedTexts: typewriterTexts.map((text) => TypewriterAnimatedText(
+                      text,
+                      speed: const Duration(milliseconds: 80),
+                      textStyle: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 15,
+                      ),
+                    )).toList(),
+                    repeatForever: true,
+                    pause: const Duration(milliseconds: 2000),
+                    displayFullTextOnTap: true,
+                    stopPauseOnTap: true,
+                    onTap: () {
+                      // Navigate to search page when the text is tapped
+                      Navigator.pushNamed(context, Routes.findDoctor);
+                    },
+                  ),
+                ),
+                const Icon(
+                  Icons.arrow_forward_ios,
+                  color: Colors.grey,
+                  size: 16,
                 ),
               ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.search,
-                    color: Colors.grey,
-                    size: 22,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: AnimatedTextKit(
-                      animatedTexts: typewriterTexts.map((text) => TypewriterAnimatedText(
-                        text,
-                        speed: const Duration(milliseconds: 80),
-                        textStyle: TextStyle(
-                          color: Colors.grey.shade600,
-                          fontSize: 15,
-                        ),
-                      )).toList(),
-                      repeatForever: true,
-                      pause: const Duration(milliseconds: 2000),
-                      displayFullTextOnTap: true,
-                      stopPauseOnTap: true,
-                    ),
-                  ),
-                ],
-              ),
             ),
           ),
         ),
