@@ -398,7 +398,7 @@ class DoctorHomeTab extends ConsumerStatefulWidget {
 
 class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
   List<AppointmentModel> _todayAppointments = [];
-  List<Map<String, dynamic>> _patientRequests = [];
+  // Removed patient requests
   List<Map<String, dynamic>> _analytics = [];
   int _unreadMessageCount = 0;
   bool _isLoading = true;
@@ -440,26 +440,6 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
         final timeB = _parseTime(b.time);
         return timeA.compareTo(timeB);
       });
-      
-      // Load patient requests (mock data for now)
-      _patientRequests = [
-        {
-          'id': 'req1',
-          'patientName': 'Sarah Wilson',
-          'type': 'Prescription Renewal',
-          'date': DateTime.now().subtract(const Duration(hours: 3)),
-          'message': 'Need a refill for hypertension medication',
-          'isUrgent': true,
-        },
-        {
-          'id': 'req2',
-          'patientName': 'Robert Brown',
-          'type': 'Medical Question',
-          'date': DateTime.now().subtract(const Duration(hours: 6)),
-          'message': 'Side effects of new medication',
-          'isUrgent': false,
-        },
-      ];
       
       // Load chats and count unread messages
       final chats = await firebaseService.getChatsForUser(widget.doctor.id);
@@ -504,14 +484,15 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
           'color': AppColors.error,
         },
       ];
+      
+      setState(() {
+        _isLoading = false;
+      });
     } catch (e) {
       debugPrint('Error loading dashboard data: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
@@ -540,7 +521,6 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
     debugPrint('Doctor in tab: ${widget.doctor.id}');
     debugPrint('Doctor name: ${widget.doctor.name}');
     debugPrint('Has today\'s appointments: ${_todayAppointments.length}');
-    debugPrint('Has patient requests: ${_patientRequests.length}');
     
     // Add error catching for the UI rendering
     try {
@@ -579,26 +559,20 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
               _buildAppointmentsList(),
               const SizedBox(height: 24),
               
-              // Patient requests
+              // Analytics section instead of Patient Requests
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Patient Requests',
+                    'Performance Analytics',
                     style: AppTypography.headlineSmall.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  TextButton(
-                    onPressed: () {
-                      // Show all patient requests
-                    },
-                    child: const Text('View All'),
-                  ),
                 ],
               ),
-              const SizedBox(height: 8),
-              _buildPatientRequestsList(),
+              const SizedBox(height: 16),
+              _buildAnalyticsGrid(),
               const SizedBox(height: 16),
             ],
           ),
@@ -856,185 +830,6 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
           );
   }
 
-  Widget _buildPatientRequestsList() {
-    return _patientRequests.isEmpty
-        ? _buildEmptyState(
-            icon: Icons.inbox,
-            title: 'No Patient Requests',
-            subtitle: 'You have no pending patient requests',
-          )
-        : ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _patientRequests.length,
-            itemBuilder: (context, index) {
-              final request = _patientRequests[index];
-              
-              return Container(
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.03),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 50,
-                            height: 50,
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: request['isUrgent'] == true ?
-                                  [AppColors.error.withOpacity(0.8), AppColors.error] :
-                                  [AppColors.secondary.withOpacity(0.8), AppColors.secondary],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.circular(15),
-                            ),
-                            child: Icon(
-                              request['isUrgent'] == true ? Icons.priority_high_rounded : Icons.message_rounded,
-                              color: Colors.white,
-                              size: 24,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        request['patientName'],
-                                        style: AppTypography.titleMedium.copyWith(
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ),
-                                    if (request['isUrgent'] == true)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                        decoration: BoxDecoration(
-                                          color: AppColors.error.withOpacity(0.1),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: Text(
-                                          'Urgent',
-                                          style: AppTypography.bodySmall.copyWith(
-                                            color: AppColors.error,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  request['type'],
-                                  style: AppTypography.bodyMedium.copyWith(
-                                    color: AppColors.textSecondary,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _formatTimeAgo(request['date']),
-                                  style: AppTypography.bodySmall.copyWith(
-                                    color: AppColors.textTertiary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceLight,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          request['message'],
-                          style: AppTypography.bodyMedium,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () {
-                                // Reject request
-                              },
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                side: BorderSide(
-                                  color: AppColors.error.withOpacity(0.5),
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                foregroundColor: AppColors.error,
-                                backgroundColor: Colors.white,
-                              ),
-                              child: Text(
-                                'Decline',
-                                style: AppTypography.bodyMedium.copyWith(
-                                  color: AppColors.error,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: ElevatedButton(
-                              onPressed: () {
-                                // Handle request
-                              },
-                              style: ElevatedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                backgroundColor: AppColors.primary,
-                                foregroundColor: Colors.white,
-                                elevation: 2,
-                                shadowColor: AppColors.primary.withOpacity(0.3),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                              child: Text(
-                                'Respond',
-                                style: AppTypography.bodyMedium.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          );
-  }
-
   Widget _buildEmptyState({
     required IconData icon,
     required String title,
@@ -1090,21 +885,6 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
     );
   }
   
-  String _formatTimeAgo(DateTime dateTime) {
-    final now = DateTime.now();
-    final difference = now.difference(dateTime);
-    
-    if (difference.inDays > 0) {
-      return '${difference.inDays}d ago';
-    } else if (difference.inHours > 0) {
-      return '${difference.inHours}h ago';
-    } else if (difference.inMinutes > 0) {
-      return '${difference.inMinutes}m ago';
-    } else {
-      return 'Just now';
-    }
-  }
-
   // Build appointment card for home tab
   Widget _buildAppointmentCard(AppointmentModel appointment) {
     return Container(
