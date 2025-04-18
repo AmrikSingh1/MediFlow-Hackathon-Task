@@ -929,200 +929,83 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
   // Community Stats Section
   Widget _buildCommunityStatsSection() {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 2),
-              ),
-            ],
+        const SizedBox(height: 30),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Text(
+            'Our community of doctors and patients drive us to create technologies for better and affordable healthcare',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+              color: Colors.black.withOpacity(0.8),
+              height: 1.3,
+            ),
           ),
-          child: Column(
+        ),
+        
+        const SizedBox(height: 32),
+        
+        // First row - Users and Doctors
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
             children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  'Our community of doctors and patients drive us to create technologies for better and affordable healthcare',
-                  textAlign: TextAlign.center,
-                  style: AppTypography.titleLarge.copyWith(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 22,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              
-              // First row - Users and Doctors
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Row(
-                  children: [
-                    // Our Users
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(
-                            Icons.person,
-                            color: AppColors.primary,
-                            size: 32,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Our Users',
-                            style: AppTypography.bodyLarge.copyWith(
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                          Text(
-                            '30 Crores',
-                            style: AppTypography.headlineMedium.copyWith(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 32,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    
-                    // Our Doctors
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(
-                            Icons.medical_services,
-                            color: AppColors.primary,
-                            size: 32,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Our Doctors',
-                            style: AppTypography.bodyLarge.copyWith(
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                          Text(
-                            '1 Lakh',
-                            style: AppTypography.headlineMedium.copyWith(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 32,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              
-              const SizedBox(height: 32),
-              
-              // Second row - Hospitals and Patient Stories
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Row(
-                  children: [
-                    // Hospitals
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(
-                            Icons.local_hospital,
-                            color: AppColors.primary,
-                            size: 32,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Hospitals',
-                            style: AppTypography.bodyLarge.copyWith(
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                          Text(
-                            '20,000',
-                            style: AppTypography.headlineMedium.copyWith(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 32,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    
-                    // Patient Stories
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(
-                            Icons.message,
-                            color: AppColors.primary,
-                            size: 32,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Patient Stories',
-                            style: AppTypography.bodyLarge.copyWith(
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                          Text(
-                            '40 Lakh',
-                            style: AppTypography.headlineMedium.copyWith(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 32,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              
-              const SizedBox(height: 30),
-              
-              // Vision statement container
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 30),
-                decoration: const BoxDecoration(
-                  color: AppColors.primary,
-                  borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(16),
-                    bottomRight: Radius.circular(16),
-                  ),
-                ),
+              // Our Users
+              Expanded(
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Icon(
+                      Icons.person,
+                      color: AppColors.primary,
+                      size: 28,
+                    ),
+                    const SizedBox(height: 8),
                     Text(
-                      'MediFlow',
+                      'Our Users',
                       style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 36,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1,
+                        color: Colors.grey.shade600,
+                        fontSize: 14,
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text(
-                        'Our vision is to help mankind live healthier, longer lives by making quality healthcare accessible.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          height: 1.5,
-                        ),
+                    Text(
+                      '30 Crores',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 28,
+                        color: Colors.black.withOpacity(0.8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              // Our Doctors
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.medical_services,
+                      color: AppColors.primary,
+                      size: 28, 
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Our Doctors',
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    Text(
+                      '1 Lakh',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 28,
+                        color: Colors.black.withOpacity(0.8),
                       ),
                     ),
                   ],
@@ -1131,7 +1014,108 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
             ],
           ),
         ),
-        const SizedBox(height: 30),
+        
+        const SizedBox(height: 32),
+        
+        // Second row - Hospitals and Patient Stories
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
+            children: [
+              // Hospitals
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.local_hospital,
+                      color: AppColors.primary,
+                      size: 28,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Hospitals',
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    Text(
+                      '20,000',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 28,
+                        color: Colors.black.withOpacity(0.8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              // Patient Stories
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.chat_bubble_outline,
+                      color: AppColors.primary,
+                      size: 28,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Patient Stories',
+                      style: TextStyle(
+                        color: Colors.grey.shade600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    Text(
+                      '40 Lakh',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 28,
+                        color: Colors.black.withOpacity(0.8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        
+        const SizedBox(height: 40),
+        
+        // Vision statement container - flat blue background
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
+          color: AppColors.primary,
+          child: Column(
+            children: [
+              Text(
+                'MediFlow',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 34,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Our vision is to help mankind live healthier, longer lives by making quality healthcare accessible.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  height: 1.5,
+                ),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
