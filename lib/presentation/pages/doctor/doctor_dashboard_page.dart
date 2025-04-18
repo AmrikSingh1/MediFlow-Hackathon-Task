@@ -887,6 +887,10 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
   
   // Build appointment card for home tab
   Widget _buildAppointmentCard(AppointmentModel appointment) {
+    // Parse time for better display
+    final timeRange = appointment.time;
+    final startTime = timeRange.split(' - ')[0];
+    
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -895,133 +899,242 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            blurRadius: 12,
+            spreadRadius: 1,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: InkWell(
         onTap: () {
           Navigator.of(context).pushNamed(
-            Routes.patientDetail.replaceAll(':id', appointment.patientId),
+            Routes.appointmentDetails.replaceAll(':id', appointment.id),
           );
         },
         borderRadius: BorderRadius.circular(20),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Time indicator
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [AppColors.primary, AppColors.primaryDark],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.primary.withOpacity(0.2),
-                      blurRadius: 6,
-                      offset: const Offset(0, 2),
+              // Time column
+              Column(
+                mainAxisAlignment: MainAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [AppColors.primary, Color(0xFF4275BD)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primary.withOpacity(0.25),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                child: Text(
-                  appointment.time.split(' - ')[0],
-                  style: AppTypography.bodySmall.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
+                    child: Text(
+                      startTime,
+                      style: AppTypography.bodyMedium.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
               const SizedBox(width: 16),
               
+              // Content area
               Expanded(
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: 50,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            appointment.type == AppointmentType.video ? 
-                              const Color(0xFF5BBFB2) : const Color(0xFFFFA952),
-                            appointment.type == AppointmentType.video ? 
-                              const Color(0xFF3A8C83) : const Color(0xFFFF8A00),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: (appointment.type == AppointmentType.video ? 
-                              const Color(0xFF5BBFB2) : const Color(0xFFFFA952)).withOpacity(0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
+                    Row(
+                      children: [
+                        // Patient avatar
+                        Container(
+                          width: 54,
+                          height: 54,
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF90A0F8), Color(0xFF6C7FDF)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            ),
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF6C7FDF).withOpacity(0.3),
+                                blurRadius: 8,
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      child: Center(
-                        child: Icon(
-                          appointment.type == AppointmentType.video ? 
-                            Icons.videocam_rounded : Icons.medical_services_rounded,
-                          color: Colors.white,
-                          size: 22,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            appointment.patientDetails?['name'] ?? 'Patient',
-                            style: AppTypography.titleMedium.copyWith(
-                              fontWeight: FontWeight.w600,
+                          child: Center(
+                            child: Text(
+                              appointment.patientDetails?['name']?.toString().split(' ').map((e) => e.isNotEmpty ? e[0] : '').join().toUpperCase() ?? 'P',
+                              style: AppTypography.titleMedium.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
-                          const SizedBox(height: 4),
-                          Row(
+                        ),
+                        const SizedBox(width: 16),
+                        
+                        // Patient info
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: AppColors.surfaceLight,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  '${appointment.patientDetails?['age'] ?? 'N/A'} years',
-                                  style: AppTypography.bodySmall.copyWith(
-                                    color: AppColors.textSecondary,
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                              Text(
+                                appointment.patientDetails?['name'] ?? 'Patient',
+                                style: AppTypography.titleMedium.copyWith(
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: AppColors.surfaceLight,
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  appointment.patientDetails?['gender'] ?? 'N/A',
-                                  style: AppTypography.bodySmall.copyWith(
-                                    color: AppColors.textSecondary,
-                                    fontWeight: FontWeight.w500,
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.surfaceLight,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      '${appointment.patientDetails?['age'] ?? 'N/A'} years',
+                                      style: AppTypography.bodySmall.copyWith(
+                                        color: AppColors.textSecondary,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
                                   ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.surfaceLight,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      appointment.patientDetails?['gender'] ?? 'N/A',
+                                      style: AppTypography.bodySmall.copyWith(
+                                        color: AppColors.textSecondary,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    const Divider(height: 1, thickness: 1, color: Color(0xFFF0F2F5)),
+                    const SizedBox(height: 16),
+                    
+                    // Appointment type and actions
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: appointment.type == AppointmentType.video
+                                ? const Color(0xFF5BBFB2).withOpacity(0.1)
+                                : const Color(0xFFFFA952).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: appointment.type == AppointmentType.video
+                                  ? const Color(0xFF5BBFB2).withOpacity(0.3)
+                                  : const Color(0xFFFFA952).withOpacity(0.3),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                appointment.type == AppointmentType.video
+                                    ? Icons.videocam_rounded
+                                    : Icons.medical_services_rounded,
+                                size: 16,
+                                color: appointment.type == AppointmentType.video
+                                    ? const Color(0xFF5BBFB2)
+                                    : const Color(0xFFFFA952),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                appointment.type == AppointmentType.video ? 'Video Call' : 'In-person',
+                                style: AppTypography.bodySmall.copyWith(
+                                  color: appointment.type == AppointmentType.video
+                                      ? const Color(0xFF5BBFB2)
+                                      : const Color(0xFFFFA952),
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ],
                           ),
-                        ],
-                      ),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          onPressed: () {
+                            // Message patient
+                            debugPrint('Message patient: ${appointment.patientId}');
+                          },
+                          icon: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withOpacity(0.1),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: AppColors.primary.withOpacity(0.3),
+                                width: 1,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.message_rounded,
+                              size: 16,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                          constraints: const BoxConstraints(),
+                          padding: EdgeInsets.zero,
+                        ),
+                        const SizedBox(width: 12),
+                        IconButton(
+                          onPressed: () {
+                            // Call patient
+                            debugPrint('Call patient: ${appointment.patientId}');
+                          },
+                          icon: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF5BBFB2).withOpacity(0.1),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: const Color(0xFF5BBFB2).withOpacity(0.3),
+                                width: 1,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.call_rounded,
+                              size: 16,
+                              color: Color(0xFF5BBFB2),
+                            ),
+                          ),
+                          constraints: const BoxConstraints(),
+                          padding: EdgeInsets.zero,
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -2633,7 +2746,7 @@ class DoctorAppointmentsTab extends ConsumerStatefulWidget {
 
 class _DoctorAppointmentsTabState extends ConsumerState<DoctorAppointmentsTab> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final List<String> _tabs = ['Upcoming', 'Past', 'Cancelled'];
+  final List<String> _tabs = ['All', 'Upcoming', 'Past', 'Cancelled'];
   
   @override
   void initState() {
@@ -2651,13 +2764,158 @@ class _DoctorAppointmentsTabState extends ConsumerState<DoctorAppointmentsTab> w
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Removed the tab bar - we're showing the home tab design from the image
-        // which doesn't have the tabs visible
+        // Header with blue background
+        Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF5386DF), Color(0xFF3A6BC0)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Appointment with current time
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    "Appointments",
+                    style: AppTypography.headlineSmall.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      "${DateFormat('h:mm').format(DateTime.now())} ${DateFormat('a').format(DateTime.now()).toUpperCase()}",
+                      style: AppTypography.bodyMedium.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF5386DF),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // Clean search bar
+              Container(
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Search patients',
+                    hintStyle: AppTypography.bodyMedium.copyWith(
+                      color: AppColors.textTertiary,
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.search_rounded,
+                      color: AppColors.textTertiary,
+                    ),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Date selector
+              Row(
+                children: [
+                  // Date display in white pill
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          DateFormat('MMM d, yyyy').format(DateTime.now()),
+                          style: AppTypography.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Icon(
+                          Icons.calendar_today,
+                          size: 16,
+                          color: Color(0xFF5386DF),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
         
+        // Tab selector
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(30),
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                color: Color(0xFFF5F7FA),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: TabBar(
+                controller: _tabController,
+                tabs: _tabs.map((title) => Tab(text: title)).toList(),
+                labelColor: Colors.white,
+                unselectedLabelColor: AppColors.textSecondary,
+                indicator: BoxDecoration(
+                  color: const Color(0xFF5386DF),
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                dividerHeight: 0,
+                labelPadding: EdgeInsets.zero,
+                padding: const EdgeInsets.all(4),
+                labelStyle: AppTypography.bodyMedium.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+                unselectedLabelStyle: AppTypography.bodyMedium.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
+                indicatorSize: TabBarIndicatorSize.tab,
+              ),
+            ),
+          ),
+        ),
+        
+        // Content area
         Expanded(
           child: TabBarView(
             controller: _tabController,
             children: [
+              _UpcomingAppointmentsView(doctorId: widget.doctor.id),
               _UpcomingAppointmentsView(doctorId: widget.doctor.id),
               _PastAppointmentsView(doctorId: widget.doctor.id),
               _CancelledAppointmentsView(doctorId: widget.doctor.id),
@@ -2667,7 +2925,7 @@ class _DoctorAppointmentsTabState extends ConsumerState<DoctorAppointmentsTab> w
       ],
     );
   }
-} 
+}
 
 // Upcoming Appointments View 
 class _UpcomingAppointmentsView extends ConsumerStatefulWidget {
@@ -2685,6 +2943,26 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
   bool _isLoading = true;
   DateTime _selectedDate = DateTime.now();
   final TextEditingController _searchController = TextEditingController();
+  
+  // Sample patient requests data
+  final List<Map<String, dynamic>> _patientRequests = [
+    {
+      'id': 'req1',
+      'patientName': 'Sarah Wilson',
+      'type': 'Prescription Renewal',
+      'date': DateTime.now().subtract(const Duration(hours: 3)),
+      'message': 'Need a refill for hypertension medication',
+      'isUrgent': true,
+    },
+    {
+      'id': 'req2',
+      'patientName': 'Robert Brown',
+      'type': 'Medical Question',
+      'date': DateTime.now().subtract(const Duration(hours: 6)),
+      'message': 'Side effects of new medication',
+      'isUrgent': false,
+    },
+  ];
   
   @override
   void initState() {
@@ -2771,206 +3049,66 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
   
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Blue header with time
-        Container(
-          padding: const EdgeInsets.all(16),
-          color: AppColors.primary,
-          child: Column(
-            children: [
-              Container(
-                height: 48,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.search, color: Colors.grey),
-                      onPressed: () {},
-                    ),
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: const InputDecoration(
-                          hintText: 'Search patients',
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(vertical: 12),
+    return _isLoading
+        ? const Center(child: CircularProgressIndicator())
+        : SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Patient Requests section
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Patient Requests',
+                        style: AppTypography.titleLarge.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    DateFormat('h:mm a').format(DateTime.now()),
-                    style: AppTypography.headlineSmall.copyWith(
-                      color: Colors.white, 
-                      fontWeight: FontWeight.bold
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(50),
-                    ),
-                    child: Row(
-                      children: [
-                        Text(
-                          DateFormat('MMM d, yyyy').format(_selectedDate),
+                      TextButton(
+                        onPressed: () {
+                          // View all requests
+                        },
+                        child: Text(
+                          'View All',
                           style: AppTypography.bodyMedium.copyWith(
-                            color: AppColors.primary,
+                            color: const Color(0xFF5386DF),
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: () async {
-                            final pickedDate = await showDatePicker(
-                              context: context,
-                              initialDate: _selectedDate,
-                              firstDate: DateTime.now().subtract(const Duration(days: 30)),
-                              lastDate: DateTime.now().add(const Duration(days: 365)),
-                              builder: (context, child) {
-                                return Theme(
-                                  data: Theme.of(context).copyWith(
-                                    colorScheme: const ColorScheme.light(
-                                      primary: AppColors.primary,
-                                      onPrimary: Colors.white,
-                                      surface: Colors.white,
-                                      onSurface: AppColors.textPrimary,
-                                    ),
-                                  ),
-                                  child: child!,
-                                );
-                              },
-                            );
-                            
-                            if (pickedDate != null) {
-                              setState(() {
-                                _selectedDate = pickedDate;
-                              });
-                              _filterAppointments();
-                            }
-                          },
-                          child: const Icon(Icons.calendar_today, color: AppColors.primary, size: 18),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: 16),
+                  
+                  // Patient request cards
+                  ..._patientRequests.map((request) => _buildPatientRequestCard(request)),
+                  
+                  const SizedBox(height: 24),
+                  
+                  // Appointments section - keeping existing functionality
+                  if (_filteredAppointments.isNotEmpty) ...[
+                    Text(
+                      'Today\'s Appointments',
+                      style: AppTypography.titleLarge.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ...(_filteredAppointments.map((appointment) => _buildAppointmentCard(appointment)).toList()),
+                  ] else
+                    _buildEmptyAppointmentsState(),
                 ],
               ),
-            ],
-          ),
-        ),
-        
-        // Patient Requests section header
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Row(
-            children: [
-              Text(
-                "Patient Requests",
-                style: AppTypography.titleLarge.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                "View All",
-                style: AppTypography.bodyMedium.copyWith(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
-        
-        // Appointments list
-        Expanded(
-          child: _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : _filteredAppointments.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 80,
-                            height: 80,
-                            decoration: BoxDecoration(
-                              color: AppColors.surfaceLight,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.event_busy,
-                              size: 36,
-                              color: AppColors.textTertiary,
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          Text(
-                            'No appointments found',
-                            style: AppTypography.titleLarge.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'There are no appointments for the selected date',
-                            style: AppTypography.bodyMedium.copyWith(
-                              color: AppColors.textSecondary,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 24),
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                _selectedDate = DateTime.now();
-                              });
-                              _filterAppointments();
-                            },
-                            icon: const Icon(Icons.refresh_rounded),
-                            label: const Text('Reset Date'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.primary,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: _filteredAppointments.length,
-                      itemBuilder: (context, index) {
-                        final appointment = _filteredAppointments[index];
-                        return _buildAppointmentCard(appointment);
-                      },
-                    ),
-        ),
-      ],
-    );
+            ),
+          );
   }
   
-  Widget _buildAppointmentCard(AppointmentModel appointment) {
-    // Parse time for better display
-    final timeRange = appointment.time;
-    final startTime = timeRange.split(' - ')[0];
-    
+  Widget _buildPatientRequestCard(Map<String, dynamic> request) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -2978,77 +3116,85 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Patient avatar with red exclamation
-                Stack(
-                  children: [
-                    CircleAvatar(
-                      radius: 25,
-                      backgroundColor: Colors.red.shade100,
-                      child: const Icon(
-                        Icons.priority_high,
-                        color: Colors.red,
-                        size: 24,
-                      ),
+                // Avatar with urgent icon
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: request['isUrgent'] == true 
+                        ? Colors.red.shade100 
+                        : Colors.teal.shade100,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Center(
+                    child: Icon(
+                      request['isUrgent'] == true 
+                          ? Icons.priority_high
+                          : Icons.chat_bubble_outline,
+                      color: request['isUrgent'] == true 
+                          ? Colors.red 
+                          : Colors.teal,
+                      size: 24,
                     ),
-                  ],
+                  ),
                 ),
-                const SizedBox(width: 16),
-                
-                // Patient info
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Expanded(
                             child: Text(
-                              appointment.patientDetails?['name'] ?? 'Patient',
+                              request['patientName'],
                               style: AppTypography.titleMedium.copyWith(
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: Colors.red.shade50,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              'Urgent',
-                              style: TextStyle(
-                                color: Colors.red,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 12,
+                          if (request['isUrgent'] == true)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                'Urgent',
+                                style: AppTypography.bodySmall.copyWith(
+                                  color: Colors.red,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
-                          ),
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 2),
                       Text(
-                        'Prescription Renewal',
+                        request['type'],
                         style: AppTypography.bodyMedium.copyWith(
                           color: AppColors.textSecondary,
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 2),
                       Text(
-                        '3h ago',
+                        '${_formatTimeAgo(request['date'])} ago',
                         style: AppTypography.bodySmall.copyWith(
                           color: AppColors.textTertiary,
                         ),
@@ -3058,43 +3204,37 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            
-            // Request message
+            const SizedBox(height: 12),
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.surfaceLight,
+                color: Colors.grey.shade50,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
-                appointment.notes ?? 'Need a refill for hypertension medication',
+                request['message'],
                 style: AppTypography.bodyMedium,
               ),
             ),
-            
             const SizedBox(height: 16),
-            
-            // Action buttons
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton(
                     onPressed: () {
-                      // Decline request
+                      // Decline logic
                     },
                     style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      side: BorderSide(color: Colors.red.withOpacity(0.5)),
+                      side: BorderSide(color: Colors.red.shade300),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      foregroundColor: Colors.red,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
                     child: Text(
                       'Decline',
                       style: AppTypography.bodyMedium.copyWith(
-                        color: Colors.red,
+                        color: Colors.red.shade400,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -3104,14 +3244,14 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
                 Expanded(
                   child: ElevatedButton(
                     onPressed: () {
-                      // Respond to request
+                      // Respond logic
                     },
                     style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      backgroundColor: AppColors.primary,
+                      backgroundColor: const Color(0xFF5386DF),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
                     child: Text(
                       'Respond',
@@ -3123,6 +3263,54 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
                   ),
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  String _formatTimeAgo(DateTime dateTime) {
+    final now = DateTime.now();
+    final difference = now.difference(dateTime);
+    
+    if (difference.inDays > 0) {
+      return '${difference.inDays}d';
+    } else if (difference.inHours > 0) {
+      return '${difference.inHours}h';
+    } else if (difference.inMinutes > 0) {
+      return '${difference.inMinutes}m';
+    } else {
+      return 'Just now';
+    }
+  }
+  
+  Widget _buildEmptyAppointmentsState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.event_busy,
+              size: 72,
+              color: Colors.grey.shade300,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No appointments today',
+              style: AppTypography.titleLarge.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'You have no appointments scheduled for today',
+              style: AppTypography.bodyMedium.copyWith(
+                color: AppColors.textSecondary,
+              ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
