@@ -20,13 +20,25 @@ final availableDoctorsProvider = FutureProvider.autoDispose<List<DoctorModel>>((
   return await firebaseService.getDoctorsFromCollection();
 });
 
-// Provider for available doctors by specialty
+// Provider for available doctors by specialty with caching
 final specialtyDoctorsProvider = FutureProvider.family<List<DoctorModel>, String>((ref, specialty) async {
   final firebaseService = ref.read(firebaseServiceProvider);
-  if (specialty.isEmpty) {
-    return await firebaseService.getDoctorsFromCollection();
+  final cacheProvider = ref.read(doctorCacheProvider);
+  
+  // Check if we already have the doctors for this specialty in cache
+  if (cacheProvider.hasSpecialty(specialty)) {
+    return cacheProvider.getDoctorsBySpecialty(specialty);
   }
-  return await firebaseService.getDoctorsFromCollection(specialty: specialty);
+  
+  // If not in cache, fetch from Firebase
+  final doctors = await firebaseService.getDoctorsFromCollection(
+    specialty: specialty.isEmpty ? null : specialty
+  );
+  
+  // Store in cache for future use
+  cacheProvider.cacheDoctors(specialty, doctors);
+  
+  return doctors;
 });
 
 // Provider for available slots for a specific doctor on a specific date
@@ -36,6 +48,42 @@ final availableSlotsProvider = FutureProvider.family<List<AppointmentSlotModel>,
   final date = params['date'] as DateTime;
   return await firebaseService.getAvailableSlotsForDoctor(doctorId, date);
 });
+
+// Provider for caching doctors
+final doctorCacheProvider = Provider<DoctorCacheService>((ref) {
+  return DoctorCacheService();
+});
+
+// Cache service for doctors
+class DoctorCacheService {
+  final Map<String, List<DoctorModel>> _specialtyCache = {};
+  final Map<String, DoctorModel> _doctorCache = {};
+  
+  // Check if we have doctors for this specialty
+  bool hasSpecialty(String specialty) {
+    return _specialtyCache.containsKey(specialty);
+  }
+  
+  // Get doctors by specialty from cache
+  List<DoctorModel> getDoctorsBySpecialty(String specialty) {
+    return _specialtyCache[specialty] ?? [];
+  }
+  
+  // Store doctors in cache
+  void cacheDoctors(String specialty, List<DoctorModel> doctors) {
+    _specialtyCache[specialty] = doctors;
+    
+    // Also cache individual doctors
+    for (final doctor in doctors) {
+      _doctorCache[doctor.id] = doctor;
+    }
+  }
+  
+  // Get a doctor by ID from cache
+  DoctorModel? getDoctorById(String doctorId) {
+    return _doctorCache[doctorId];
+  }
+}
 
 class BookAppointmentPage extends ConsumerStatefulWidget {
   const BookAppointmentPage({super.key});
@@ -56,17 +104,12 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
   String? _selectedSlotId;
   
   bool _isLoading = false;
-  bool _isFetchingDoctors = false;
   
   // List to store available slots
   List<AppointmentSlotModel> _availableSlots = [];
   
   // Future to store the async operation for loading slots
   Future<List<AppointmentSlotModel>>? _slotsAsync;
-
-  // Cache for doctors by specialty to make loading instant
-  Map<String, List<DoctorModel>> _doctorsBySpecialty = {};
-  List<DoctorModel> _currentDoctors = [];
 
   // List of specialties
   final List<String> _specialties = [
@@ -83,59 +126,19 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
     'Dentist',
   ];
   
+  // New: Add a loading state for doctors
+  bool _isLoadingDoctors = false;
+  // New: Local cached list of doctors
+  List<DoctorModel> _availableDoctors = [];
+  
   @override
   void initState() {
     super.initState();
     // Initialize _slotsAsync as needed
     _updateSlotsAsync();
-    // Pre-fetch all doctors and categorize by specialty
-    _prefetchAllDoctors();
-  }
-
-  // Pre-fetch all doctors and categorize them by specialty for instant loading
-  void _prefetchAllDoctors() async {
-    setState(() {
-      _isFetchingDoctors = true;
-    });
-
-    try {
-      // Fetch all doctors once
-      final firebaseService = FirebaseService();
-      final allDoctors = await firebaseService.getDoctorsFromCollection();
-      
-      // Organize doctors by specialty
-      final Map<String, List<DoctorModel>> doctorMap = {};
-      
-      // Initialize with empty lists for all specialties
-      for (final specialty in _specialties) {
-        doctorMap[specialty] = [];
-      }
-      
-      // Categorize doctors by specialty
-      for (final doctor in allDoctors) {
-        final specialty = doctor.specialty;
-        if (doctorMap.containsKey(specialty)) {
-          doctorMap[specialty]!.add(doctor);
-        } else {
-          // For specialties not in our predefined list
-          doctorMap[specialty] = [doctor];
-        }
-      }
-      
-      if (mounted) {
-        setState(() {
-          _doctorsBySpecialty = doctorMap;
-          _isFetchingDoctors = false;
-        });
-      }
-    } catch (e) {
-      debugPrint("Error pre-fetching doctors: $e");
-      if (mounted) {
-        setState(() {
-          _isFetchingDoctors = false;
-        });
-      }
-    }
+    
+    // Pre-fetch doctors for common specialties
+    _preFetchDoctors();
   }
 
   // Helper method to update slots async when doctor or date changes
@@ -171,6 +174,64 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
       
       // Still use the provider for consistency
       _slotsAsync = ref.read(availableSlotsProvider(params).future);
+    }
+  }
+
+  // Pre-fetch doctors for common specialties
+  Future<void> _preFetchDoctors() async {
+    final firebaseService = FirebaseService();
+    
+    // Pre-fetch for common specialties in background
+    for (final specialty in ['General Physician', 'Cardiologist', 'Dermatologist']) {
+      firebaseService.getDoctorsFromCollection(specialty: specialty).then((doctors) {
+        if (mounted) {
+          final cacheProvider = ref.read(doctorCacheProvider);
+          cacheProvider.cacheDoctors(specialty, doctors);
+        }
+      });
+    }
+  }
+  
+  // Helper to load doctors by specialty
+  Future<void> _loadDoctorsBySpecialty(String specialty) async {
+    if (specialty.isEmpty) return;
+    
+    setState(() {
+      _isLoadingDoctors = true;
+    });
+    
+    try {
+      // Check if doctors are in cache first
+      final cacheProvider = ref.read(doctorCacheProvider);
+      if (cacheProvider.hasSpecialty(specialty)) {
+        setState(() {
+          _availableDoctors = cacheProvider.getDoctorsBySpecialty(specialty);
+          _isLoadingDoctors = false;
+        });
+        return;
+      }
+      
+      // If not in cache, fetch them directly (faster than waiting for the provider)
+      final firebaseService = FirebaseService();
+      final doctors = await firebaseService.getDoctorsFromCollection(specialty: specialty);
+      
+      // Cache for future use
+      cacheProvider.cacheDoctors(specialty, doctors);
+      
+      if (mounted) {
+        setState(() {
+          _availableDoctors = doctors;
+          _isLoadingDoctors = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading doctors: $e");
+      if (mounted) {
+        setState(() {
+          _availableDoctors = [];
+          _isLoadingDoctors = false;
+        });
+      }
     }
   }
 
@@ -247,19 +308,17 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
                   );
                 }).toList(),
                 onChanged: (String? value) {
+                  final newSpecialty = value ?? '';
                   setState(() {
-                    _selectedSpecialty = value ?? '';
-                    
+                    _selectedSpecialty = newSpecialty;
                     // Reset doctor selection when specialty changes
                     _selectedDoctorId = null;
-                    
-                    // Update current doctors from cached doctors by specialty
-                    if (_selectedSpecialty.isNotEmpty && _doctorsBySpecialty.containsKey(_selectedSpecialty)) {
-                      _currentDoctors = _doctorsBySpecialty[_selectedSpecialty] ?? [];
-                    } else {
-                      _currentDoctors = [];
-                    }
                   });
+                  
+                  // Load doctors immediately when specialty changes
+                  if (newSpecialty.isNotEmpty) {
+                    _loadDoctorsBySpecialty(newSpecialty);
+                  }
                 },
                 validator: (value) {
                   if (value == null || value.isEmpty) {
@@ -283,145 +342,143 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
               ),
               const SizedBox(height: 12),
               
-              // Use the pre-fetched doctors instead of loading them each time
-              Builder(
-                builder: (context) {
-                  // Show loading indicator only when fetching all doctors initially
-                  if (_isFetchingDoctors) {
-                    return const Center(
+              // Show doctors from local state immediately
+              _isLoadingDoctors
+                  ? const Center(
                       child: Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: CircularProgressIndicator(),
-                      ),
-                    );
-                  }
-                  
-                  final doctors = _doctorsBySpecialty[_selectedSpecialty] ?? [];
-                  
-                  if (doctors.isEmpty) {
-                    return Center(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16.0),
-                        child: Text(
-                          'No doctors available for $_selectedSpecialty',
-                          style: AppTypography.bodyMedium.copyWith(
-                            color: AppColors.textSecondary,
+                        padding: EdgeInsets.symmetric(vertical: 16.0),
+                        child: SizedBox(
+                          height: 24,
+                          width: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.0,
                           ),
                         ),
                       ),
-                    );
-                  }
-                  
-                  return LayoutBuilder(
-                    builder: (context, constraints) {
-                      return Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          color: AppColors.surfaceLight,
-                        ),
-                        constraints: const BoxConstraints(minHeight: 50, maxHeight: 60),
-                        child: DropdownButtonFormField<String>(
-                          value: _selectedDoctorId,
-                          decoration: InputDecoration(
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide.none,
+                    )
+                  : _availableDoctors.isEmpty
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 16.0),
+                            child: Text(
+                              'No doctors available for $_selectedSpecialty',
+                              style: AppTypography.bodyMedium.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
                             ),
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: constraints.maxWidth < 350 ? 4 : 8,
-                            ),
-                            hintText: 'Select a doctor',
-                            filled: true,
-                            fillColor: Colors.transparent,
-                            isDense: true,
                           ),
-                          menuMaxHeight: MediaQuery.of(context).size.height * 0.4,
-                          itemHeight: constraints.maxWidth < 350 ? 50 : 60,
-                          items: doctors.map((doctor) {
-                            return DropdownMenuItem<String>(
-                              value: doctor.id,
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  maxHeight: constraints.maxWidth < 350 ? 40 : 50,
+                        )
+                      : LayoutBuilder(
+                          builder: (context, constraints) {
+                            return Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                color: AppColors.surfaceLight,
+                              ),
+                              constraints: const BoxConstraints(minHeight: 50, maxHeight: 60),
+                              child: DropdownButtonFormField<String>(
+                                value: _selectedDoctorId,
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: constraints.maxWidth < 350 ? 4 : 8,
+                                  ),
+                                  hintText: 'Select a doctor',
+                                  filled: true,
+                                  fillColor: Colors.transparent,
+                                  isDense: true,
                                 ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.start,
-                                  crossAxisAlignment: CrossAxisAlignment.center,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    CircleAvatar(
-                                      radius: constraints.maxWidth < 350 ? 14 : 16,
-                                      backgroundColor: Color.fromRGBO(
-                                        AppColors.primary.red.toInt(),
-                                        AppColors.primary.green.toInt(), 
-                                        AppColors.primary.blue.toInt(),
-                                        0.1),
-                                      child: Text(
-                                        doctor.name.isNotEmpty ? doctor.name[0] : 'D',
-                                        style: TextStyle(
-                                          color: AppColors.primary,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: constraints.maxWidth < 350 ? 10 : 12,
-                                        ),
+                                menuMaxHeight: MediaQuery.of(context).size.height * 0.4,
+                                itemHeight: constraints.maxWidth < 350 ? 50 : 60,
+                                items: _availableDoctors.map((doctor) {
+                                  return DropdownMenuItem<String>(
+                                    value: doctor.id,
+                                    child: ConstrainedBox(
+                                      constraints: BoxConstraints(
+                                        maxHeight: constraints.maxWidth < 350 ? 40 : 50,
                                       ),
-                                    ),
-                                    SizedBox(width: constraints.maxWidth < 350 ? 6 : 8),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        mainAxisAlignment: MainAxisAlignment.center,
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.start,
+                                        crossAxisAlignment: CrossAxisAlignment.center,
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Text(
-                                            'Dr. ${doctor.name}',
-                                            style: AppTypography.bodyMedium.copyWith(
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: constraints.maxWidth < 350 ? 12 : 14,
+                                          CircleAvatar(
+                                            radius: constraints.maxWidth < 350 ? 14 : 16,
+                                            backgroundColor: Color.fromRGBO(
+                                              AppColors.primary.red.toInt(),
+                                              AppColors.primary.green.toInt(), 
+                                              AppColors.primary.blue.toInt(),
+                                              0.1),
+                                            child: Text(
+                                              doctor.name.isNotEmpty ? doctor.name[0] : 'D',
+                                              style: TextStyle(
+                                                color: AppColors.primary,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: constraints.maxWidth < 350 ? 10 : 12,
+                                              ),
                                             ),
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 1,
                                           ),
-                                          Text(
-                                            doctor.specialty,
-                                            style: AppTypography.bodySmall.copyWith(
-                                              color: AppColors.textSecondary,
-                                              fontSize: constraints.maxWidth < 350 ? 10 : 12,
+                                          SizedBox(width: constraints.maxWidth < 350 ? 6 : 8),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              mainAxisAlignment: MainAxisAlignment.center,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  'Dr. ${doctor.name}',
+                                                  style: AppTypography.bodyMedium.copyWith(
+                                                    fontWeight: FontWeight.w600,
+                                                    fontSize: constraints.maxWidth < 350 ? 12 : 14,
+                                                  ),
+                                                  overflow: TextOverflow.ellipsis,
+                                                  maxLines: 1,
+                                                ),
+                                                Text(
+                                                  doctor.specialty,
+                                                  style: AppTypography.bodySmall.copyWith(
+                                                    color: AppColors.textSecondary,
+                                                    fontSize: constraints.maxWidth < 350 ? 10 : 12,
+                                                  ),
+                                                  overflow: TextOverflow.ellipsis,
+                                                  maxLines: 1,
+                                                ),
+                                              ],
                                             ),
-                                            overflow: TextOverflow.ellipsis,
-                                            maxLines: 1,
                                           ),
                                         ],
                                       ),
                                     ),
-                                  ],
-                                ),
+                                  );
+                                }).toList(),
+                                onChanged: (String? value) {
+                                  setState(() {
+                                    _selectedDoctorId = value;
+                                    // Reset slot selection when doctor changes
+                                    _selectedSlotId = null;
+                                  });
+                                  
+                                  // Update slots when doctor changes
+                                  if (value != null) {
+                                    _updateSlotsAsync();
+                                  }
+                                },
+                                validator: (value) {
+                                  if (value == null || value.isEmpty) {
+                                    return 'Please select a doctor';
+                                  }
+                                  return null;
+                                },
+                                dropdownColor: AppColors.surfaceLight,
+                                isExpanded: true,
                               ),
                             );
-                          }).toList(),
-                          onChanged: (String? value) {
-                            setState(() {
-                              _selectedDoctorId = value;
-                              // Reset slot selection when doctor changes
-                              _selectedSlotId = null;
-                              // Update slot information
-                              _updateSlotsAsync();
-                            });
                           },
-                          validator: (value) {
-                            if (value == null || value.isEmpty) {
-                              return 'Please select a doctor';
-                            }
-                            return null;
-                          },
-                          dropdownColor: AppColors.surfaceLight,
-                          isExpanded: true,
                         ),
-                      );
-                    },
-                  );
-                },
-              ),
               const SizedBox(height: 24),
             ],
                   
