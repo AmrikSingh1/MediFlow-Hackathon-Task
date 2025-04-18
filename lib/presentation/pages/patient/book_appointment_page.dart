@@ -252,6 +252,7 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
                       borderRadius: BorderRadius.circular(12),
                       color: AppColors.surfaceLight,
                     ),
+                    constraints: const BoxConstraints(minHeight: 60),
                     child: DropdownButtonFormField<String>(
                       value: _selectedDoctorId,
                       decoration: InputDecoration(
@@ -261,57 +262,62 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
                         ),
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 16,
-                              vertical: 12,
+                          vertical: 16,
                         ),
                         hintText: 'Select a doctor',
                         filled: true,
                         fillColor: Colors.transparent,
-                            isDense: true,
+                        isDense: false,
                       ),
-                      menuMaxHeight: 350,
+                      menuMaxHeight: 400,
+                      itemHeight: 75,
                       items: doctors.map((doctor) {
                         return DropdownMenuItem<String>(
                           value: doctor.id,
-                          child: Row(
-                            children: [
-                              CircleAvatar(
-                                radius: 20,
-                                backgroundColor: Color.fromRGBO(
-                                  AppColors.primary.red.toInt(),
-                                  AppColors.primary.green.toInt(), 
-                                  AppColors.primary.blue.toInt(),
-                                  0.1),
-                                child: Text(
-                                  doctor.name.isNotEmpty ? doctor.name[0] : 'D',
-                                  style: const TextStyle(
-                                    color: AppColors.primary,
-                                    fontWeight: FontWeight.bold,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 20,
+                                  backgroundColor: Color.fromRGBO(
+                                    AppColors.primary.red.toInt(),
+                                    AppColors.primary.green.toInt(), 
+                                    AppColors.primary.blue.toInt(),
+                                    0.1),
+                                  child: Text(
+                                    doctor.name.isNotEmpty ? doctor.name[0] : 'D',
+                                    style: const TextStyle(
+                                      color: AppColors.primary,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      'Dr. ${doctor.name}',
-                                      style: AppTypography.bodyMedium.copyWith(
-                                        fontWeight: FontWeight.w600,
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Dr. ${doctor.name}',
+                                        style: AppTypography.bodyMedium.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
                                       ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    Text(
-                                          doctor.specialty,
-                                      style: AppTypography.bodySmall.copyWith(
-                                        color: AppColors.textSecondary,
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        doctor.specialty,
+                                        style: AppTypography.bodySmall.copyWith(
+                                          color: AppColors.textSecondary,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         );
                       }).toList(),
