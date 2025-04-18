@@ -30,6 +30,27 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
   bool _agreeToTerms = false;
   bool _isLoading = false;
   UserType _selectedUserType = UserType.patient;
+  String? _selectedSpecialty;
+  
+  // List of available specialties
+  final List<String> _specialties = [
+    'General Physician',
+    'Cardiologist',
+    'Dermatologist',
+    'Endocrinologist',
+    'Family Medicine',
+    'Gastroenterologist',
+    'Neurologist',
+    'Obstetrics & Gynecology',
+    'Oncology',
+    'Ophthalmology',
+    'Orthopedics',
+    'Pediatrics',
+    'Psychiatry',
+    'Pulmonology',
+    'Rheumatology',
+    'Urology',
+  ];
   
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -96,6 +117,28 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
         return;
       }
       
+      // Check if doctor has selected a specialty
+      if (_selectedUserType == UserType.doctor && (_selectedSpecialty == null || _selectedSpecialty!.isEmpty)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error_outline, color: Colors.white, size: 20),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text('Please select your medical specialty'),
+                ),
+              ],
+            ),
+            backgroundColor: AppColors.error,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            margin: const EdgeInsets.all(10),
+          ),
+        );
+        return;
+      }
+      
       setState(() {
         _isLoading = true;
       });
@@ -110,6 +153,7 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
           _passwordController.text,
           _nameController.text,
           _selectedUserType == UserType.patient ? UserRole.patient : UserRole.doctor,
+          specialty: _selectedUserType == UserType.doctor ? _selectedSpecialty : null,
         );
         
         if (mounted) {
@@ -350,6 +394,10 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
                       onTap: () {
                         setState(() {
                           _selectedUserType = UserType.doctor;
+                          // Set default specialty if none selected
+                          if (_selectedSpecialty == null || _selectedSpecialty!.isEmpty) {
+                            _selectedSpecialty = _specialties[0];
+                          }
                         });
                       },
                     ),
@@ -357,6 +405,71 @@ class _RegisterPageState extends State<RegisterPage> with SingleTickerProviderSt
                 ],
               ),
               const SizedBox(height: 24),
+              
+              // Doctor Specialty selection (only if doctor is selected)
+              if (_selectedUserType == UserType.doctor) ...[
+                Text(
+                  'Medical Specialty',
+                  style: AppTypography.titleMedium.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFF2D3748),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color(0xFFE2E8F0),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: DropdownButtonFormField<String>(
+                    value: _selectedSpecialty ?? _specialties.first,
+                    decoration: InputDecoration(
+                      hintText: 'Select your medical specialty',
+                      prefixIcon: const Icon(
+                        Icons.medical_services_outlined,
+                        color: Color(0xFF9AA5B1),
+                      ),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                    ),
+                    style: AppTypography.bodyMedium,
+                    icon: const Icon(
+                      Icons.arrow_drop_down_rounded,
+                      color: Color(0xFF9AA5B1),
+                    ),
+                    isExpanded: true,
+                    dropdownColor: Colors.white,
+                    items: _specialties.map((String specialty) {
+                      return DropdownMenuItem<String>(
+                        value: specialty,
+                        child: Text(
+                          specialty,
+                          style: AppTypography.bodyMedium,
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (String? value) {
+                      setState(() {
+                        _selectedSpecialty = value;
+                      });
+                    },
+                    validator: (value) {
+                      if (_selectedUserType == UserType.doctor && (value == null || value.isEmpty)) {
+                        return 'Please select your medical specialty';
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
               
               // Personal Information Title
               Text(

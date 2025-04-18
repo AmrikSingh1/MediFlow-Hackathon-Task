@@ -7,7 +7,14 @@ import 'package:medi_connect/core/services/firebase_service.dart';
 
 class AuthService extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    // Server client ID for Google Sign-In
+    serverClientId: '1057695268657-cir3ahv7d3h738ui3gjmn50tmblb8gu8.apps.googleusercontent.com',
+    scopes: <String>[
+      'email',
+      'profile',
+    ],
+  );
   final FirebaseService _firebaseService = FirebaseService();
   UserModel? _userModel;
   
@@ -64,7 +71,8 @@ class AuthService extends ChangeNotifier {
     String email, 
     String password, 
     String name, 
-    UserRole role
+    UserRole role,
+    {String? specialty}
   ) async {
     try {
       final userCredential = await _auth.createUserWithEmailAndPassword(
@@ -74,16 +82,30 @@ class AuthService extends ChangeNotifier {
       
       // Create user in Firestore
       if (userCredential.user != null) {
+        final Map<String, dynamic>? additionalInfo = role == UserRole.doctor && specialty != null 
+            ? {
+                'specialty': specialty,
+                'doctorInfo': {
+                  'specialty': specialty,
+                  'isAvailable': true,
+                  'rating': 0.0,
+                  'ratingCount': 0,
+                  'experience': 0,
+                }
+              } 
+            : null;
+            
         final user = UserModel(
           id: userCredential.user!.uid,
           name: name,
           email: email,
           role: role,
+          doctorInfo: role == UserRole.doctor && specialty != null ? {'specialty': specialty} : null,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
         );
         
-        await _firebaseService.createUser(user);
+        await _firebaseService.createUser(user, additionalInfo: additionalInfo);
         _userModel = user;
         notifyListeners();
       }
@@ -97,70 +119,195 @@ class AuthService extends ChangeNotifier {
   // Sign in with Google
   Future<UserCredential> signInWithGoogle() async {
     try {
-      debugPrint("Starting Google Sign-In process...");
+      debugPrint("===== STARTING GOOGLE SIGN-IN PROCESS =====");
+      debugPrint("Current platform: ${defaultTargetPlatform.toString()}");
       
-      // 1. Google Sign-In
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      // First try to clear any existing sign-in sessions
+      try {
+        await _googleSignIn.signOut();
+        debugPrint("✓ Successfully signed out any existing Google sessions");
+      } catch (e) {
+        debugPrint("! No existing Google session to sign out: $e");
+      }
+      
+      // 1. Google Sign-In with better error handling
+      debugPrint("1. Attempting to get GoogleSignInAccount...");
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn()
+          .timeout(
+            const Duration(minutes: 1),
+            onTimeout: () {
+              debugPrint("! Google Sign-In timed out after 1 minute");
+              throw FirebaseAuthException(
+                code: 'ERROR_SIGN_IN_TIMEOUT',
+                message: 'Google Sign-In timed out. Please try again.',
+              );
+            },
+          )
+          .catchError((error) {
+            debugPrint("! Error during Google Sign-In: $error");
+            if (error.toString().contains('network')) {
+              throw FirebaseAuthException(
+                code: 'ERROR_NETWORK_REQUEST_FAILED',
+                message: 'Network error during sign in. Please check your connection.',
+              );
+            }
+            throw FirebaseAuthException(
+              code: 'ERROR_GOOGLE_SIGN_IN_FAILED',
+              message: 'Google Sign-In failed: ${error.toString()}',
+            );
+          });
+      
       if (googleUser == null) {
-        debugPrint("Sign-in aborted: User canceled the sign-in process");
+        debugPrint("! Sign-in aborted: User canceled the sign-in process");
         throw FirebaseAuthException(
           code: 'ERROR_ABORTED_BY_USER',
           message: 'Sign in aborted by user',
         );
       }
       
-      debugPrint("Google Sign-In successful for: ${googleUser.email}");
+      debugPrint("✓ Google Sign-In successful for: ${googleUser.email}");
+      debugPrint("  User ID: ${googleUser.id}");
+      debugPrint("  Display name: ${googleUser.displayName}");
       
-      // 2. Get authentication credentials
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+      // 2. Get authentication credentials with better error handling
+      debugPrint("2. Getting Google authentication tokens...");
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication
+          .timeout(
+            const Duration(seconds: 30),
+            onTimeout: () {
+              debugPrint("! Authentication token request timed out");
+              throw FirebaseAuthException(
+                code: 'ERROR_AUTH_TOKEN_TIMEOUT',
+                message: 'Authentication token request timed out. Please try again.',
+              );
+            },
+          )
+          .catchError((error) {
+            debugPrint("! Error getting Google authentication: $error");
+            throw FirebaseAuthException(
+              code: 'ERROR_GOOGLE_AUTH_FAILED',
+              message: 'Failed to get Google authentication: ${error.toString()}',
+            );
+          });
+      
+      debugPrint("  Received authentication tokens:");
+      debugPrint("  Access token exists: ${googleAuth.accessToken != null}");
+      debugPrint("  ID token exists: ${googleAuth.idToken != null}");
+      
+      if (googleAuth.accessToken == null || googleAuth.idToken == null) {
+        debugPrint("! Google Auth tokens are null");
+        throw FirebaseAuthException(
+          code: 'ERROR_MISSING_GOOGLE_AUTH_TOKEN',
+          message: 'Google authentication tokens are missing',
+        );
+      }
+      
+      // Create the credential
+      debugPrint("3. Creating Firebase credential with Google tokens...");
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
       
       // 3. Sign in to Firebase with credentials
-      final userCredential = await _auth.signInWithCredential(credential);
-      debugPrint("Firebase Auth credential successful. User ID: ${userCredential.user?.uid}");
+      debugPrint("4. Signing in to Firebase with Google credentials...");
+      final userCredential = await _auth.signInWithCredential(credential)
+          .timeout(
+            const Duration(seconds: 30),
+            onTimeout: () {
+              debugPrint("! Firebase sign-in timed out");
+              throw FirebaseAuthException(
+                code: 'ERROR_FIREBASE_TIMEOUT',
+                message: 'Firebase authentication timed out. Please try again.',
+              );
+            },
+          )
+          .catchError((error) {
+            debugPrint("! Firebase Auth sign-in failed: $error");
+            
+            // Handle specific Firebase auth errors
+            if (error is FirebaseAuthException) {
+              switch (error.code) {
+                case 'account-exists-with-different-credential':
+                  debugPrint("! Account exists with different credential");
+                  throw FirebaseAuthException(
+                    code: error.code,
+                    message: 'An account already exists with the same email. Try another sign-in method.',
+                  );
+                case 'invalid-credential':
+                  debugPrint("! Invalid credential");
+                  throw FirebaseAuthException(
+                    code: error.code,
+                    message: 'The authentication credential is invalid. Please try again.',
+                  );
+                default:
+                  throw error;
+              }
+            }
+            
+            throw FirebaseAuthException(
+              code: 'ERROR_FIREBASE_AUTH_FAILED',
+              message: 'Firebase authentication failed: ${error.toString()}',
+            );
+          });
+      
+      if (userCredential.user == null) {
+        debugPrint("! No user returned from Firebase Auth");
+        throw FirebaseAuthException(
+          code: 'ERROR_NULL_USER',
+          message: 'No user returned from authentication. Please try again.',
+        );
+      }
+      
+      debugPrint("✓ Firebase Auth credential successful. User ID: ${userCredential.user?.uid}");
       
       // 4. Check if user exists in Firestore
+      debugPrint("5. Checking if user exists in Firestore...");
       if (userCredential.user != null) {
         final user = userCredential.user!;
         
         // Direct confirmation that the user is in Firebase Auth
-        final tokenResult = await user.getIdTokenResult(true);
-        debugPrint("User ID token validated: ${tokenResult.token != null}");
+        try {
+          final tokenResult = await user.getIdTokenResult(true);
+          debugPrint("✓ User ID token validated: ${tokenResult.token != null}");
+        } catch (e) {
+          debugPrint("! Error getting ID token: $e");
+        }
         
         // 5. Check if user exists in Firestore
-        final existingUser = await _firebaseService.getUserById(user.uid);
-        
-        if (existingUser != null) {
-          debugPrint("User already exists in Firestore, updating last login");
-          // Update existing user
-          final updatedUser = existingUser.copyWith(
-            updatedAt: Timestamp.now(),
-            name: user.displayName ?? existingUser.name,
-            profileImageUrl: user.photoURL ?? existingUser.profileImageUrl,
-          );
+        try {
+          final existingUser = await _firebaseService.getUserById(user.uid);
           
-          try {
-            await _firebaseService.updateUser(updatedUser);
-            debugPrint("Successfully updated user in Firestore");
-            _userModel = updatedUser;
-            notifyListeners();
-          } catch (e) {
-            debugPrint("Error updating user in Firestore: $e");
+          if (existingUser != null) {
+            debugPrint("✓ User already exists in Firestore, updating last login");
+            // Update existing user
+            final updatedUser = existingUser.copyWith(
+              updatedAt: Timestamp.now(),
+              name: user.displayName ?? existingUser.name,
+              profileImageUrl: user.photoURL ?? existingUser.profileImageUrl,
+            );
+            
+            try {
+              await _firebaseService.updateUser(updatedUser);
+              debugPrint("✓ Successfully updated user in Firestore");
+              _userModel = updatedUser;
+              notifyListeners();
+            } catch (e) {
+              debugPrint("! Error updating user in Firestore: $e");
+            }
+          } else {
+            // For new users, let the login page handle role selection and user creation
+            debugPrint("! New user detected. Login page will handle role selection.");
           }
-        } else {
-          // For new users, let the login page handle role selection and user creation
-          debugPrint("New user detected. Login page will handle role selection.");
+        } catch (e) {
+          debugPrint("! Error checking user in Firestore: $e");
         }
-      } else {
-        debugPrint("Warning: No user returned from Firebase Auth");
       }
       
+      debugPrint("===== GOOGLE SIGN-IN PROCESS COMPLETED =====");
       return userCredential;
     } catch (e) {
-      debugPrint("Error in Google Sign-In: $e");
+      debugPrint("! ERROR in Google Sign-In: $e");
       rethrow;
     }
   }

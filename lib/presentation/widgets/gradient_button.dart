@@ -4,7 +4,7 @@ import 'package:medi_connect/core/constants/app_typography.dart';
 
 class GradientButton extends StatelessWidget {
   final String text;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final double? width;
   final double height;
   final double borderRadius;

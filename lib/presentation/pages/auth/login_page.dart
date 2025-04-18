@@ -125,9 +125,11 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
   Future<void> _loginWithGoogle() async {
     setState(() {
       _isLoading = true;
+      _errorMessage = '';
     });
 
     try {
+      debugPrint("Attempting Google sign-in from login page");
       final userCredential = await _authService.signInWithGoogle();
       
       if (userCredential.user != null) {
@@ -190,8 +192,57 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
       }
     } catch (e) {
       if (!mounted) return;
+      
+      // Provide more detailed error message
+      String errorMessage;
+      if (e is FirebaseAuthException) {
+        switch (e.code) {
+          case 'ERROR_ABORTED_BY_USER':
+            errorMessage = 'Sign-in was cancelled';
+            break;
+          case 'ERROR_GOOGLE_SIGN_IN_FAILED':
+            errorMessage = 'Google Sign-In failed. Please try again.';
+            break;
+          case 'ERROR_GOOGLE_AUTH_FAILED':
+            errorMessage = 'Could not authenticate with Google. Please try again.';
+            break;
+          case 'ERROR_MISSING_GOOGLE_AUTH_TOKEN':
+            errorMessage = 'Authentication token missing. Please try again.';
+            break;
+          case 'ERROR_FIREBASE_AUTH_FAILED':
+            errorMessage = 'Authentication with Firebase failed. Please try again.';
+            break;
+          case 'account-exists-with-different-credential':
+            errorMessage = 'An account already exists with the same email. Try signing in with a different method.';
+            break;
+          case 'network-request-failed':
+            errorMessage = 'Network error. Please check your internet connection.';
+            break;
+          default:
+            errorMessage = 'Error signing in: ${e.message ?? e.code}';
+        }
+        debugPrint('Firebase Auth Error: ${e.code} - ${e.message}');
+      } else {
+        errorMessage = 'Error signing in: ${e.toString()}';
+        debugPrint('Error during Google Sign-In: $e');
+      }
+      
+      _errorMessage = errorMessage;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error signing in with Google: ${e.toString()}')),
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: Colors.red[700],
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'Dismiss',
+            textColor: Colors.white,
+            onPressed: () {},
+          ),
+        ),
       );
     } finally {
       if (mounted) {
@@ -607,7 +658,7 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
                   // Forgot Password
                   GestureDetector(
                     onTap: () {
-                      // TODO: Implement forgot password
+                      _showForgotPasswordDialog();
                     },
                     child: Text(
                       'Forgot Password?',
@@ -780,6 +831,125 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // Show forgot password dialog
+  void _showForgotPasswordDialog() {
+    final TextEditingController emailController = TextEditingController();
+    bool isLoading = false;
+    String errorMessage = '';
+    
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Text(
+              'Reset Password',
+              style: AppTypography.titleMedium.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Enter your email address to receive a password reset link.',
+                  style: AppTypography.bodyMedium,
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: emailController,
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    hintText: 'Enter your email',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    prefixIcon: const Icon(Icons.email_outlined),
+                  ),
+                  keyboardType: TextInputType.emailAddress,
+                  onChanged: (_) => setState(() => errorMessage = ''),
+                ),
+                if (errorMessage.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    errorMessage,
+                    style: AppTypography.bodySmall.copyWith(
+                      color: AppColors.error,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(
+                  'Cancel',
+                  style: AppTypography.bodyMedium.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+              isLoading
+                ? Container(
+                    width: 24,
+                    height: 24,
+                    padding: const EdgeInsets.all(4),
+                    child: const CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : TextButton(
+                    onPressed: () async {
+                      if (emailController.text.trim().isEmpty) {
+                        setState(() {
+                          errorMessage = 'Please enter your email';
+                        });
+                        return;
+                      }
+                      
+                      setState(() {
+                        isLoading = true;
+                        errorMessage = '';
+                      });
+                      
+                      try {
+                        await _authService.resetPassword(emailController.text.trim());
+                        
+                        if (mounted) {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Password reset email sent. Please check your inbox.'),
+                              backgroundColor: AppColors.success,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        setState(() {
+                          isLoading = false;
+                          errorMessage = e.toString().contains('no user record')
+                              ? 'No account found with this email'
+                              : 'Failed to send reset email. Please try again.';
+                        });
+                      }
+                    },
+                    child: Text(
+                      'Send Link',
+                      style: AppTypography.bodyMedium.copyWith(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+            ],
+          );
+        },
       ),
     );
   }

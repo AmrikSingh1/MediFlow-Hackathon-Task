@@ -3,10 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:medi_connect/core/constants/app_colors.dart';
 import 'package:medi_connect/core/constants/app_typography.dart';
 import 'package:medi_connect/core/services/ai_service.dart';
-import 'package:medi_connect/core/services/auth_service.dart';
-import 'package:medi_connect/core/services/firebase_service.dart';
-import 'package:medi_connect/core/models/message_model.dart' as model;
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:math' as math;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:image_picker/image_picker.dart';
@@ -22,8 +18,6 @@ import 'package:path_provider/path_provider.dart';
 
 // AI Service provider
 final aiServiceProvider = Provider<AIService>((ref) => AIService());
-final firebaseServiceProvider = Provider<FirebaseService>((ref) => FirebaseService());
-final authServiceProvider = Provider<AuthService>((ref) => AuthService());
 
 enum AttachmentType {
   none,
@@ -42,7 +36,6 @@ class ChatMessage {
   final String? attachmentUrl;
   final AttachmentType attachmentType;
   final Duration? audioDuration;
-  final Map<String, dynamic>? metadata;
   
   ChatMessage({
     required this.id,
@@ -53,7 +46,6 @@ class ChatMessage {
     this.attachmentUrl,
     this.attachmentType = AttachmentType.none,
     this.audioDuration,
-    this.metadata,
   });
 }
 
@@ -77,20 +69,18 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   bool _isTyping = false;
   bool _showSuggestions = true; // Track whether to show suggestion chips
   String _selectedLanguage = 'english'; // Default language
-  String? _attachmentPath;
-  AttachmentType _currentAttachmentType = AttachmentType.none;
   
   // Added for model selection
   late AIService _aiService;
   String _currentModelId = '';
-  final bool _showModelSelector = false;
+  bool _showModelSelector = false;
   
   // Sample data - in a real app, this would come from a database
   late List<ChatMessage> _messages;
   late Map<String, dynamic> _chatInfo;
   
   // For AI conversation
-  final _conversationHistory = <Map<String, String>>[];
+  var _conversationHistory = <Map<String, String>>[];
   
   // Example questions for the AI assistant - English
   final List<String> _exampleQuestions = [
@@ -119,17 +109,15 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     "COVID-19 टीकों के बारे में मुझे क्या जानना चाहिए?",
   ];
   
-  // Audio recording variables
   bool _isRecordingPaused = false;
   int _recordingDuration = 0;
-  Timer? _timer;
-  String? _audioFilePath;
+  Timer? _recordingTimer;
   File? _currentAudioFile;
   bool _isPlayingAudio = false;
   String? _currentlyPlayingAudioId;
   
   // Audio recording and playback instances
-  final _audioRecorder = record_package.AudioRecorder();
+  final _audioRecorder = record_package.Record();
   final Map<String, AudioPlayer> _audioPlayers = {};
   
   @override
@@ -151,72 +139,6 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     
     // Check for microphone permission status
     _checkMicrophonePermission();
-    
-    // For debugging: Save chat data to ensure Firestore is working
-    Future.delayed(const Duration(seconds: 2), () {
-      _saveAllMessagesToFirestore();
-    });
-  }
-  
-  // Save all existing messages to Firestore
-  Future<void> _saveAllMessagesToFirestore() async {
-    try {
-      final firebaseService = ref.read(firebaseServiceProvider);
-      final authService = ref.read(authServiceProvider);
-      final user = await authService.getCurrentUser();
-      
-      if (user == null) {
-        debugPrint('Cannot save messages: user not logged in');
-        return;
-      }
-      
-      debugPrint('Saving all ${_messages.length} messages to Firestore');
-      
-      // Save each message to Firestore
-      for (final message in _messages) {
-        // Skip temporary messages
-        if (message.id.startsWith('processing-')) continue;
-        
-        // Convert AttachmentType to MessageType
-        model.MessageType messageType = model.MessageType.text;
-        if (message.attachmentType == AttachmentType.image) {
-          messageType = model.MessageType.image;
-        } else if (message.attachmentType == AttachmentType.audio) {
-          messageType = model.MessageType.audio;
-        }
-        
-        // Save message to Firestore
-        await firebaseService.sendMessage(
-          model.MessageModel(
-            id: message.id,
-            chatId: widget.chatId,
-            senderId: message.isUser ? user.uid : (widget.chatId == '3' ? 'ai-assistant' : widget.chatId),
-            text: message.text,
-            timestamp: Timestamp.fromDate(message.timestamp),
-            status: model.MessageStatus.sent,
-            type: messageType,
-            fileInfo: message.attachmentUrl != null ? {'url': message.attachmentUrl} : null,
-          ),
-        );
-      }
-      
-      // Update the chat's last message in Firestore if there are messages
-      if (_messages.isNotEmpty) {
-        final lastMessage = _messages.last;
-        await firebaseService.updateChatLastMessage(
-          widget.chatId,
-          lastMessage.text,
-          Timestamp.fromDate(lastMessage.timestamp),
-        );
-        
-        // Save conversation for easy access in messages tab
-        await firebaseService.saveChatConversation(user.uid, widget.chatId);
-        
-        debugPrint('All messages saved to Firestore');
-      }
-    } catch (e) {
-      debugPrint('Error saving all messages to Firestore: $e');
-    }
   }
   
   void _loadChatData() {
@@ -376,7 +298,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
-    _timer?.cancel();
+    _recordingTimer?.cancel();
     
     // Dispose audio recorder and players
     _audioRecorder.dispose();
@@ -388,46 +310,134 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   }
   
   Future<void> _sendMessage() async {
-    final messageText = _messageController.text.trim();
-    if (messageText.isEmpty) return;
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
+    
+    final newMessageId = 'msg-${DateTime.now().millisecondsSinceEpoch}';
     
     setState(() {
-      _isTyping = true;
+      _showSuggestions = false; // Hide suggestions after sending a message
+      _messages.add(
+        ChatMessage(
+          id: newMessageId,
+          text: text,
+          isUser: true,
+          timestamp: DateTime.now(),
+        ),
+      );
+      _messageController.clear();
     });
     
-    _messageController.clear();
-    
-    // Add user message
-    final userMessage = ChatMessage(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      text: messageText,
-      isUser: true,
-      timestamp: DateTime.now(),
-    );
-    
-    setState(() {
-      _messages.add(userMessage);
-      _scrollToBottom();
+    // Add to conversation history
+    _conversationHistory.add({
+      'role': 'user',
+      'content': text
     });
     
-    // Get AI response
+    // Scroll to bottom after sending message
+    _scrollToBottom();
+    
+    // Process with AI if it's the AI Assistant chat
     if (widget.chatId == '3') {
-      await _processMessageWithAI(messageText);
-    } else {
-      // Mock response for other chats
-      await Future.delayed(const Duration(seconds: 1));
-      _addResponse('Thanks for your message. I will get back to you soon.');
+      // Show typing indicator
+      setState(() {
+        _isTyping = true;
+      });
+      
+      try {
+        // Use the AIService to generate a response with selected language
+        final aiService = ref.read(aiServiceProvider);
+        
+        // Display conversation history for debugging
+        debugPrint("ChatPage: Conversation history (${_conversationHistory.length} messages):");
+        for (var i = 0; i < _conversationHistory.length; i++) {
+          final msg = _conversationHistory[i];
+          final preview = msg['content'].toString().length > 30 
+              ? msg['content'].toString().substring(0, 30) + "..." 
+              : msg['content'];
+          debugPrint("  ${i+1}. ${msg['role']}: $preview");
+        }
+        
+        // Send the user's message to the AI service
+        final response = await aiService.generateResponse(
+          prompt: text,
+          conversationHistory: _conversationHistory,
+          language: _selectedLanguage,
+        );
+        
+        debugPrint("ChatPage: Received AI response: ${response.substring(0, math.min(50, response.length))}...");
+        
+        if (mounted) {
+          setState(() {
+            _isTyping = false;
+            _messages.add(
+              ChatMessage(
+                id: 'ai-${DateTime.now().millisecondsSinceEpoch}',
+                text: response,
+                isUser: false,
+                timestamp: DateTime.now(),
+              ),
+            );
+          });
+          
+          // Add to conversation history
+          _conversationHistory.add({
+            'role': 'assistant',
+            'content': response
+          });
+          
+          // Keep conversation history size manageable
+          if (_conversationHistory.length > 20) {
+            // Keep the system message at the beginning if it exists
+            if (_conversationHistory.isNotEmpty && _conversationHistory[0]['role'] == 'system') {
+              final systemMessage = _conversationHistory[0];
+              _conversationHistory = [systemMessage] + _conversationHistory.sublist(_conversationHistory.length - 19);
+            } else {
+              _conversationHistory = _conversationHistory.sublist(_conversationHistory.length - 20);
+            }
+            
+            debugPrint("ChatPage: Trimmed conversation history to 20 messages");
+          }
+          
+          // Scroll to bottom after receiving response
+          _scrollToBottom();
+        }
+      } catch (e) {
+        // Handle errors
+        debugPrint("ChatPage: Error getting AI response: $e");
+        
+        if (mounted) {
+          setState(() {
+            _isTyping = false;
+            
+            // Error message in the selected language
+            String errorMessage;
+            switch (_selectedLanguage) {
+              case 'hindi':
+                errorMessage = 'मुझे क्षमा करें, आपके अनुरोध को संसाधित करते समय मुझे एक समस्या का सामना करना पड़ा। कृपया एक अलग प्रश्न के साथ फिर से प्रयास करें।';
+                break;
+              case 'hinglish':
+                errorMessage = 'I\'m sorry, aapke request ko process karte waqt mujhe ek issue face karna pada. Please kisi different question ke saath dobara try karein.';
+                break;
+              default:
+                errorMessage = 'I\'m sorry, I encountered an issue while processing your request. Please try again with a different question.';
+            }
+            
+            _messages.add(
+              ChatMessage(
+                id: 'ai-error-${DateTime.now().millisecondsSinceEpoch}',
+                text: errorMessage,
+                isUser: false,
+                timestamp: DateTime.now(),
+              ),
+            );
+          });
+          
+          // Scroll to bottom after error message
+          _scrollToBottom();
+        }
+      }
     }
-    
-    // Save messages to Firestore
-    await _saveConversationToFirestore();
-    
-    // Ensure the conversation is saved to the dashboard
-    await _saveConversationToDashboard();
-    
-    setState(() {
-      _isTyping = false;
-    });
   }
   
   void _scrollToBottom() {
@@ -485,12 +495,10 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       if (!await _audioRecorder.isRecording()) {
         // Start recording with config object
         await _audioRecorder.start(
-          record_package.RecordConfig(
-            encoder: record_package.AudioEncoder.aacLc,
-            bitRate: 128000,
-            sampleRate: 44100,
-          ),
           path: filePath,
+          encoder: record_package.AudioEncoder.aacLc,
+          bitRate: 128000,
+          samplingRate: 44100,
         );
         
         setState(() {
@@ -501,7 +509,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         });
         
         // Start timer to track recording duration
-        _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
           if (!_isRecordingPaused && _isRecording) {
             setState(() {
               _recordingDuration++;
@@ -547,64 +555,92 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     }
   }
   
-  Future<void> _stopRecording({bool canceled = false}) async {
-    if (!_isRecording) return;
+  void _stopRecording({bool canceled = false}) async {
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
     
-    final path = await _audioRecorder.stop();
-    _audioFilePath = path;
-    
-    setState(() {
-      _isRecording = false;
-      _isRecordingPaused = false;
-      _recordingDuration = 0;
-      _timer?.cancel();
-      _timer = null;
-    });
-    
-    if (canceled || _audioFilePath == null) {
-      debugPrint('Recording canceled or no file path');
-      return;
-    }
-    
-    final audioFile = File(_audioFilePath!);
-    
-    if (await audioFile.exists()) {
-      debugPrint('Audio file saved: $_audioFilePath');
-      
-      setState(() {
-        _isTyping = true;
-      });
-      
-      // Add user audio message
-      final userMessage = ChatMessage(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        text: 'Voice message',
-        isUser: true,
-        timestamp: DateTime.now(),
-        attachmentType: AttachmentType.audio,
-        attachmentUrl: _audioFilePath,
-        metadata: {'audioPath': _audioFilePath},
-      );
-      
-      setState(() {
-        _messages.add(userMessage);
+    if (_isRecording) {
+      try {
+        // Stop the recording
+        final filePath = await _audioRecorder.stop();
+        
+        setState(() {
+          _isRecording = false;
+          _isRecordingPaused = false;
+          _recordingDuration = 0;
+          _currentAudioFile = filePath != null ? File(filePath) : null;
+        });
+        
+        if (canceled || _recordingDuration < 1 || filePath == null) {
+          // Recording was canceled or too short or path is null
+          _currentAudioFile = null;
+          return;
+        }
+        
+        // Set the current audio file
+        _currentAudioFile = File(filePath);
+        
+        // Format the duration for display
+        final minutes = (_recordingDuration ~/ 60).toString().padLeft(2, '0');
+        final seconds = (_recordingDuration % 60).toString().padLeft(2, '0');
+        final durationText = '$minutes:$seconds';
+        
+        final messageId = 'voice-${DateTime.now().millisecondsSinceEpoch}';
+        
+        // Add the voice message to the chat
+        setState(() {
+          _messages.add(
+            ChatMessage(
+              id: messageId,
+              text: 'Voice Message ($durationText)',
+              isUser: true,
+              timestamp: DateTime.now(),
+              attachmentType: AttachmentType.audio,
+              attachmentUrl: filePath,
+              audioDuration: Duration(seconds: _recordingDuration),
+            ),
+          );
+        });
+        
+        // Add message to conversation history
+        _conversationHistory.add({
+          'role': 'user',
+          'content': '[Voice message: $durationText]'
+        });
+        
+        // Process with AI if it's the AI Assistant chat
+        if (widget.chatId == '3' && _currentAudioFile != null) {
+          _processVoiceMessageWithAI(_currentAudioFile!);
+        }
+        
+        // Reset for next recording
+        _currentAudioFile = null;
+        _recordingDuration = 0;
+        
+        // Scroll to bottom after sending voice message
         _scrollToBottom();
-      });
-      
-      // Process the voice message
-      await _processVoiceMessageWithAI(audioFile);
-      
-      // Save messages to Firestore
-      await _saveConversationToFirestore();
-      
-      // Save to dashboard
-      await _saveConversationToDashboard();
-      
-      setState(() {
-        _isTyping = false;
-      });
+      } catch (e) {
+        debugPrint('Error stopping recording: $e');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Error stopping recording: $e',
+              style: const TextStyle(color: Colors.white),
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+      }
     } else {
-      debugPrint('Audio file does not exist: $_audioFilePath');
+      setState(() {
+        _isRecording = false;
+        _isRecordingPaused = false;
+        _recordingDuration = 0;
+      });
     }
   }
   
@@ -676,82 +712,69 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   
   // Process voice message with AI
   Future<void> _processVoiceMessageWithAI(File audioFile) async {
-    // Show a temporary message indicating that the voice is being processed
-    final tempMessageId = 'processing-${DateTime.now().millisecondsSinceEpoch}';
-    
+    // Show typing indicator
     setState(() {
       _isTyping = true;
-      // Add a temporary message to indicate processing
-      _messages.add(ChatMessage(
-        id: tempMessageId,
-        text: "Processing your voice message...",
-        isUser: false,
-        timestamp: DateTime.now(),
-      ));
-      _scrollToBottom();
     });
     
     try {
-      // Transcribe the audio file using AIService
       final aiService = ref.read(aiServiceProvider);
-      String transcribedText;
       
-      try {
-        transcribedText = await aiService.transcribeAudio(audioFile);
-        debugPrint('Transcription successful: $transcribedText');
-      } catch (e) {
-        debugPrint('Error transcribing audio: $e');
-        transcribedText = '';
+      // For a real implementation, use actual transcription:
+      // String transcribedText = await aiService.transcribeAudio(audioFile);
+      
+      // Simulating transcription for the demo:
+      String transcribedText = "This is a simulated transcription of my voice message. I was explaining my symptoms and asking about treatment options.";
+      
+      debugPrint("Voice message transcribed: $transcribedText");
+      
+      // Use the transcribed text to generate a response
+      final response = await aiService.generateResponse(
+        prompt: transcribedText,
+        conversationHistory: _conversationHistory,
+        language: _selectedLanguage,
+      );
+      
+      if (mounted) {
+        setState(() {
+          _isTyping = false;
+          _messages.add(
+            ChatMessage(
+              id: 'ai-${DateTime.now().millisecondsSinceEpoch}',
+              text: response,
+              isUser: false,
+              timestamp: DateTime.now(),
+            ),
+          );
+        });
+        
+        // Add to conversation history
+        _conversationHistory.add({
+          'role': 'assistant',
+          'content': response
+        });
+        
+        // Scroll to bottom after receiving response
+        _scrollToBottom();
       }
-      
-      // If transcription is empty, prompt the user to type their question
-      if (transcribedText.isEmpty) {
-        transcribedText = "I couldn't understand your voice message. Could you please type your question instead?";
-      }
-      
-      // Remove the temporary message
-      setState(() {
-        _messages.removeWhere((msg) => msg.id == tempMessageId);
-      });
-      
-      // Add the transcribed text as a user message
-      final transcribedMessageId = 'transcription-${DateTime.now().millisecondsSinceEpoch}';
-      _messages.add(ChatMessage(
-        id: transcribedMessageId,
-        text: transcribedText,
-        isUser: true,
-        timestamp: DateTime.now(),
-      ));
-      
-      // Add to conversation history
-      _conversationHistory.add({
-        'role': 'user',
-        'content': transcribedText
-      });
-      
-      // Get AI response
-      await _processMessageWithAI(transcribedText);
-      
     } catch (e) {
-      // Remove the temporary message
-      setState(() {
-        _messages.removeWhere((msg) => msg.id == tempMessageId);
-      });
+      debugPrint("Error processing voice message: $e");
       
-      // Add error message
-      _messages.add(ChatMessage(
-        id: 'error-${DateTime.now().millisecondsSinceEpoch}',
-        text: "Sorry, I couldn't process your voice message. Please try again or type your message.",
-        isUser: false,
-        timestamp: DateTime.now(),
-      ));
-      
-      debugPrint('Error processing voice message: $e');
-    } finally {
-      // Ensure typing indicator is off
-      setState(() {
-        _isTyping = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isTyping = false;
+          _messages.add(
+            ChatMessage(
+              id: 'ai-error-${DateTime.now().millisecondsSinceEpoch}',
+              text: 'Sorry, I had trouble understanding your voice message. Could you please try again or type your message?',
+              isUser: false,
+              timestamp: DateTime.now(),
+            ),
+          );
+        });
+        
+        _scrollToBottom();
+      }
     }
   }
   
@@ -832,323 +855,306 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        // Only show save dialog for AI Assistant chat and if there are messages
-        if (widget.chatId == '3' && _messages.isNotEmpty && _messages.any((msg) => msg.isUser)) {
-          return await _showSaveConversationDialog();
-        }
-        return true; // Allow pop for other chats
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          title: LayoutBuilder(
-            builder: (context, constraints) {
-              return Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _chatInfo['avatar'] is IconData
-                    ? Icon(_chatInfo['avatar'] as IconData, color: AppColors.primary)
-                    : CircleAvatar(
-                        backgroundColor: Colors.grey[300],
-                        radius: 16,
-                        child: Text(
-                          _chatInfo['name'].toString().substring(0, 1),
-                          style: const TextStyle(
-                            color: Colors.black87,
-                            fontWeight: FontWeight.bold,
-                          ),
+    return Scaffold(
+      appBar: AppBar(
+        title: LayoutBuilder(
+          builder: (context, constraints) {
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _chatInfo['avatar'] is IconData
+                  ? Icon(_chatInfo['avatar'] as IconData, color: AppColors.primary)
+                  : CircleAvatar(
+                      backgroundColor: Colors.grey[300],
+                      radius: 16,
+                      child: Text(
+                        _chatInfo['name'].toString().substring(0, 1),
+                        style: const TextStyle(
+                          color: Colors.black87,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _chatInfo['name'],
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 6,
-                              height: 6,
-                              decoration: BoxDecoration(
-                                color: _chatInfo['isOnline'] ? Colors.green : Colors.grey,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Flexible(
-                              child: Text(
-                                _chatInfo['isOnline'] 
-                                    ? 'Online' 
-                                    : 'Last seen ${_formatRelativeTime(_chatInfo['lastSeen'])}',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
                     ),
-                  ),
-                ],
-              );
-            }
-          ),
-          titleSpacing: 0,
-          actions: [
-            // Model selector (only for AI chat)
-            if (widget.chatId == '3')
-              IconButton(
-                icon: const Icon(Icons.auto_awesome),
-                tooltip: 'Change AI Model',
-                onPressed: () {
-                  _showModelSelectionDialog();
-                },
-              ),
-            // Language menu (only for AI chat)
-            if (widget.chatId == '3')
-              PopupMenuButton<String>(
-                onSelected: (value) {
-                  setState(() {
-                    _selectedLanguage = value;
-                  });
-                  _showLanguageGreeting(value);
-                },
-                icon: const Icon(Icons.language),
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
-                    value: 'english',
-                    child: Text('English'),
-                  ),
-                  const PopupMenuItem(
-                    value: 'hinglish',
-                    child: Text('Hinglish'),
-                  ),
-                  const PopupMenuItem(
-                    value: 'hindi',
-                    child: Text('हिंदी (Hindi)'),
-                  ),
-                ],
-              ),
-            // Video call and voice call buttons (only for doctor chats, not AI)
-            if (widget.chatId != '3')
-              IconButton(
-                icon: const Icon(Icons.videocam),
-                onPressed: () {
-                  // TODO: Implement video call
-                },
-              ),
-            if (widget.chatId != '3')
-              IconButton(
-                icon: const Icon(Icons.call),
-                onPressed: () {
-                  // TODO: Implement voice call
-                },
-              ),
-            IconButton(
-              icon: const Icon(Icons.more_vert),
-              onPressed: () {
-                // TODO: Show more options
-              },
-            ),
-          ],
-        ),
-        body: SafeArea(
-          child: Column(
-            children: [
-              Expanded(
-                child: Stack(
-                  children: [
-                    ListView.builder(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16).copyWith(
-                        bottom: _showSuggestions && widget.chatId == '3' && !_messages.any((msg) => msg.isUser) ? 100 : 16,
-                      ),
-                      itemCount: _messages.length,
-                      itemBuilder: (context, index) {
-                        final message = _messages[index];
-                        return _buildMessageBubble(message);
-                      },
-                    ),
-                    
-                    // Show suggestion chips if enabled (only for AI chat and when no messages from user yet)
-                    if (_showSuggestions && 
-                        widget.chatId == '3' && 
-                        !_messages.any((msg) => msg.isUser))
-                      Positioned(
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                        child: _buildSuggestionChips(),
-                      ),
-                  ],
-                ),
-              ),
-              
-              // Typing indicator
-              if (_isTyping)
-                Container(
-                  padding: const EdgeInsets.only(left: 16, bottom: 8),
-                  alignment: Alignment.centerLeft,
-                  child: Row(
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceLight,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Row(
-                          children: [
-                            _buildTypingDot(1),
-                            _buildTypingDot(2),
-                            _buildTypingDot(3),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
                       Text(
-                        'MediConnect Assistant is typing...',
-                        style: AppTypography.bodySmall.copyWith(
-                          color: AppColors.textSecondary,
+                        _chatInfo['name'],
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: _chatInfo['isOnline'] ? Colors.green : Colors.grey,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              _chatInfo['isOnline'] 
+                                  ? 'Online' 
+                                  : 'Last seen ${_formatRelativeTime(_chatInfo['lastSeen'])}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-              
-              // Message input
-              Container(
-                padding: EdgeInsets.only(
-                  left: 16, 
-                  right: 16, 
-                  top: 12, 
-                  bottom: MediaQuery.of(context).viewInsets.bottom > 0 ? 12 : 12 + MediaQuery.of(context).padding.bottom,
+              ],
+            );
+          }
+        ),
+        titleSpacing: 0,
+        actions: [
+          // Model selector (only for AI chat)
+          if (widget.chatId == '3')
+            IconButton(
+              icon: const Icon(Icons.auto_awesome),
+              tooltip: 'Change AI Model',
+              onPressed: () {
+                _showModelSelectionDialog();
+              },
+            ),
+          // Language menu (only for AI chat)
+          if (widget.chatId == '3')
+            PopupMenuButton<String>(
+              onSelected: (value) {
+                setState(() {
+                  _selectedLanguage = value;
+                });
+                _showLanguageGreeting(value);
+              },
+              icon: const Icon(Icons.language),
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'english',
+                  child: Text('English'),
                 ),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      offset: const Offset(0, -2),
-                      blurRadius: 4,
+                const PopupMenuItem(
+                  value: 'hinglish',
+                  child: Text('Hinglish'),
+                ),
+                const PopupMenuItem(
+                  value: 'hindi',
+                  child: Text('हिंदी (Hindi)'),
+                ),
+              ],
+            ),
+          // Video call and voice call buttons (only for doctor chats, not AI)
+          if (widget.chatId != '3')
+            IconButton(
+              icon: const Icon(Icons.videocam),
+              onPressed: () {
+                // TODO: Implement video call
+              },
+            ),
+          if (widget.chatId != '3')
+            IconButton(
+              icon: const Icon(Icons.call),
+              onPressed: () {
+                // TODO: Implement voice call
+              },
+            ),
+          IconButton(
+            icon: const Icon(Icons.more_vert),
+            onPressed: () {
+              // TODO: Show more options
+            },
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: Stack(
+                children: [
+                  ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16).copyWith(
+                      bottom: _showSuggestions && widget.chatId == '3' && !_messages.any((msg) => msg.isUser) ? 100 : 16,
                     ),
-                  ],
-                ),
+                    itemCount: _messages.length,
+                    itemBuilder: (context, index) {
+                      final message = _messages[index];
+                      return _buildMessageBubble(message);
+                    },
+                  ),
+                  
+                  // Show suggestion chips if enabled (only for AI chat and when no messages from user yet)
+                  if (_showSuggestions && 
+                      widget.chatId == '3' && 
+                      !_messages.any((msg) => msg.isUser))
+                    Positioned(
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      child: _buildSuggestionChips(),
+                    ),
+                ],
+              ),
+            ),
+            
+            // Typing indicator
+            if (_isTyping)
+              Container(
+                padding: const EdgeInsets.only(left: 16, bottom: 8),
+                alignment: Alignment.centerLeft,
                 child: Row(
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.attach_file),
-                      color: AppColors.textSecondary,
-                      onPressed: _toggleAttachments,
-                    ),
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceLight,
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: TextField(
-                          controller: _messageController,
-                          decoration: InputDecoration(
-                            hintText: _getHintTextForLanguage(),
-                            border: InputBorder.none,
-                          ),
-                          onSubmitted: (_) => _sendMessage(),
-                        ),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceLight,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        children: [
+                          _buildTypingDot(1),
+                          _buildTypingDot(2),
+                          _buildTypingDot(3),
+                        ],
                       ),
                     ),
-                    // Recording button with additional UI for recording state
-                    _isRecording
-                        ? Row(
-                            children: [
-                              // Recording indicator with timer
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.red.withOpacity(0.2),
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Container(
-                                      width: 8,
-                                      height: 8,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: _isRecordingPaused ? Colors.grey : Colors.red,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 5),
-                                    Text(
-                                      '${(_recordingDuration ~/ 60).toString().padLeft(2, '0')}:${(_recordingDuration % 60).toString().padLeft(2, '0')}',
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              // Pause/resume button
-                              IconButton(
-                                icon: Icon(_isRecordingPaused ? Icons.play_arrow : Icons.pause),
-                                color: AppColors.textSecondary,
-                                onPressed: _toggleRecordingPause,
-                              ),
-                              // Stop recording button - cancels recording
-                              IconButton(
-                                icon: const Icon(Icons.stop),
-                                color: Colors.red,
-                                onPressed: () => _stopRecording(canceled: true),
-                                tooltip: 'Cancel recording',
-                              ),
-                              // Send audio message button
-                              IconButton(
-                                icon: const Icon(Icons.send),
-                                color: AppColors.primary,
-                                onPressed: () => _stopRecording(),
-                                tooltip: 'Send voice message',
-                              ),
-                            ],
-                          )
-                        : Row(
-                            children: [
-                              IconButton(
-                                icon: Icon(_isRecording ? Icons.stop : Icons.mic),
-                                color: _isRecording ? Colors.red : AppColors.textSecondary,
-                                onPressed: _toggleRecording,
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.send),
-                                color: AppColors.primary,
-                                onPressed: _sendMessage,
-                              ),
-                            ],
-                          ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'MediConnect Assistant is typing...',
+                      style: AppTypography.bodySmall.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
                   ],
                 ),
               ),
-              
-              if (_isAttaching) _buildAttachmentOptions(),
-            ],
-          ),
+            
+            // Message input
+            Container(
+              padding: EdgeInsets.only(
+                left: 16, 
+                right: 16, 
+                top: 12, 
+                bottom: MediaQuery.of(context).viewInsets.bottom > 0 ? 12 : 12 + MediaQuery.of(context).padding.bottom,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    offset: const Offset(0, -2),
+                    blurRadius: 4,
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.attach_file),
+                    color: AppColors.textSecondary,
+                    onPressed: _toggleAttachments,
+                  ),
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceLight,
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      child: TextField(
+                        controller: _messageController,
+                        decoration: InputDecoration(
+                          hintText: _getHintTextForLanguage(),
+                          border: InputBorder.none,
+                        ),
+                        onSubmitted: (_) => _sendMessage(),
+                      ),
+                    ),
+                  ),
+                  // Recording button with additional UI for recording state
+                  _isRecording
+                      ? Row(
+                          children: [
+                            // Recording indicator with timer
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: _isRecordingPaused ? Colors.grey : Colors.red,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    '${(_recordingDuration ~/ 60).toString().padLeft(2, '0')}:${(_recordingDuration % 60).toString().padLeft(2, '0')}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            // Pause/resume button
+                            IconButton(
+                              icon: Icon(_isRecordingPaused ? Icons.play_arrow : Icons.pause),
+                              color: AppColors.textSecondary,
+                              onPressed: _toggleRecordingPause,
+                            ),
+                            // Stop recording button
+                            IconButton(
+                              icon: const Icon(Icons.stop),
+                              color: Colors.red,
+                              onPressed: () => _stopRecording(),
+                            ),
+                          ],
+                        )
+                      : Row(
+                          children: [
+                            IconButton(
+                              icon: Icon(_isRecording ? Icons.stop : Icons.mic),
+                              color: _isRecording ? Colors.red : AppColors.textSecondary,
+                              onPressed: _toggleRecording,
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.send),
+                              color: AppColors.primary,
+                              onPressed: _sendMessage,
+                            ),
+                          ],
+                        ),
+                ],
+              ),
+            ),
+            
+            if (_isAttaching) _buildAttachmentOptions(),
+          ],
         ),
       ),
     );
@@ -1684,6 +1690,17 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     }
   }
   
+  // Request permission with better handling and UI
+  Future<bool> _requestMicrophonePermission() async {
+    final status = await Permission.microphone.status;
+    if (status.isGranted) {
+      return true;
+    }
+    
+    final result = await Permission.microphone.request();
+    return result.isGranted;
+  }
+  
   // Show custom permission dialog
   Future<void> _showPermissionDialog() async {
     return showDialog(
@@ -1796,7 +1813,6 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         _handleAttachment('image', image.path);
       }
     } catch (e) {
-      debugPrint('Error picking image: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error picking image: $e')),
       );
@@ -2457,254 +2473,6 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         ),
       ),
     );
-  }
-
-  // Save conversation to Firestore after sending/receiving message
-  Future<void> _saveConversationToFirestore() async {
-    if (widget.chatId != '3') return; // Only save AI assistant conversations
-    
-    try {
-      final firebaseService = ref.read(firebaseServiceProvider);
-      final authService = ref.read(authServiceProvider);
-      final user = await authService.getCurrentUser();
-      
-      if (user == null) {
-        debugPrint('Cannot save conversation: user not logged in');
-        return;
-      }
-      
-      // Update the chat's last message in Firestore
-      if (_messages.isNotEmpty) {
-        final lastMessage = _messages.last;
-        
-        // Update last message in chat collection
-        await firebaseService.updateChatLastMessage(
-          widget.chatId,
-          lastMessage.text,
-          Timestamp.fromDate(lastMessage.timestamp),
-        );
-        
-        // Convert AttachmentType to MessageType
-        model.MessageType messageType = model.MessageType.text;
-        if (lastMessage.attachmentType == AttachmentType.image) {
-          messageType = model.MessageType.image;
-        } else if (lastMessage.attachmentType == AttachmentType.audio) {
-          messageType = model.MessageType.audio;
-        }
-        
-        // Save message to Firestore
-        await firebaseService.sendMessage(
-          model.MessageModel(
-            id: lastMessage.id,
-            chatId: widget.chatId,
-            senderId: lastMessage.isUser ? user.uid : 'ai-assistant',
-            text: lastMessage.text,
-            timestamp: Timestamp.fromDate(lastMessage.timestamp),
-            status: model.MessageStatus.sent,
-            type: messageType,
-            fileInfo: lastMessage.attachmentUrl != null ? {'url': lastMessage.attachmentUrl} : null,
-          ),
-        );
-        
-        // Save conversation for easy access in messages tab
-        await firebaseService.saveChatConversation(user.uid, widget.chatId);
-        
-        debugPrint('Conversation with AI saved to Firestore');
-      }
-    } catch (e) {
-      debugPrint('Error saving conversation to Firestore: $e');
-    }
-  }
-
-  // Show dialog to save conversation before leaving
-  Future<bool> _showSaveConversationDialog() async {
-    final result = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: Text(
-            'Save Conversation?',
-            style: AppTypography.titleMedium.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          content: Text(
-            'Would you like to save this conversation to view it in your Messages tab later?',
-            style: AppTypography.bodyMedium,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop(true); // Don't save, but allow pop
-              },
-              child: Text(
-                'Don\'t Save',
-                style: AppTypography.bodyMedium.copyWith(
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              onPressed: () async {
-                // Save conversation
-                await _saveConversationToFirestore();
-                
-                // Show success toast
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Conversation saved'),
-                      behavior: SnackBarBehavior.floating,
-                      duration: const Duration(seconds: 2),
-                      backgroundColor: AppColors.success,
-                    ),
-                  );
-                }
-                
-                // Allow pop
-                Navigator.of(context).pop(true);
-              },
-              child: Text(
-                'Save',
-                style: AppTypography.bodyMedium.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-    
-    // Default to allow pop if dialog is dismissed somehow
-    return result ?? true;
-  }
-
-  // Save conversation to dashboard
-  Future<void> _saveConversationToDashboard() async {
-    try {
-      final authService = ref.read(authServiceProvider);
-      final firebaseService = ref.read(firebaseServiceProvider);
-      final user = await authService.getCurrentUser();
-      
-      if (user == null) {
-        debugPrint('Cannot save conversation: No authenticated user');
-        return;
-      }
-      
-      // Save conversation for messages tab
-      final success = await firebaseService.saveChatConversation(user.uid, widget.chatId);
-      debugPrint('Conversation saved to dashboard: $success');
-    } catch (e) {
-      debugPrint('Error saving conversation to dashboard: $e');
-    }
-  }
-
-  // Add a response message (called by _sendMessage when not using AI)
-  void _addResponse(String text) {
-    setState(() {
-      _messages.add(ChatMessage(
-        id: 'ai-${DateTime.now().millisecondsSinceEpoch}',
-        text: text,
-        isUser: false,
-        timestamp: DateTime.now(),
-      ));
-    });
-    _scrollToBottom();
-  }
-
-  // Process a message with AI (called by _sendMessage)
-  Future<void> _processMessageWithAI(String messageText) async {
-    // Add to conversation history
-    _conversationHistory.add({
-      'role': 'user',
-      'content': messageText
-    });
-    
-    try {
-      // Use the AIService to generate a response
-      final aiService = ref.read(aiServiceProvider);
-      
-      // Display conversation history for debugging
-      debugPrint("ChatPage: Conversation history (${_conversationHistory.length} messages):");
-      for (var i = 0; i < _conversationHistory.length; i++) {
-        final msg = _conversationHistory[i];
-        final preview = msg['content'].toString().length > 30 
-            ? msg['content'].toString().substring(0, 30) + "..." 
-            : msg['content'];
-        debugPrint("  ${i+1}. ${msg['role']}: $preview");
-      }
-      
-      // Send the user's message to the AI service
-      final response = await aiService.generateResponse(
-        prompt: messageText,
-        conversationHistory: _conversationHistory,
-        language: _selectedLanguage,
-      );
-      
-      if (mounted) {
-        setState(() {
-          _messages.add(ChatMessage(
-            id: 'ai-${DateTime.now().millisecondsSinceEpoch}',
-            text: response,
-            isUser: false,
-            timestamp: DateTime.now(),
-          ));
-        });
-        
-        // Add to conversation history
-        _conversationHistory.add({
-          'role': 'assistant',
-          'content': response
-        });
-        
-        // Scroll to bottom after receiving response
-        _scrollToBottom();
-      }
-    } catch (e) {
-      // Handle errors
-      debugPrint("ChatPage: Error getting AI response: $e");
-      
-      if (mounted) {
-        setState(() {
-          // Error message in the selected language
-          String errorMessage;
-          switch (_selectedLanguage) {
-            case 'hindi':
-              errorMessage = 'मुझे क्षमा करें, आपके अनुरोध को संसाधित करते समय मुझे एक समस्या का सामना करना पड़ा। कृपया एक अलग प्रश्न के साथ फिर से प्रयास करें।';
-              break;
-            case 'hinglish':
-              errorMessage = 'I\'m sorry, aapke request ko process karte waqt mujhe ek issue face karna pada. Please kisi different question ke saath dobara try karein.';
-              break;
-            default:
-              errorMessage = 'I\'m sorry, I encountered an issue while processing your request. Please try again with a different question.';
-          }
-          
-          _messages.add(ChatMessage(
-            id: 'ai-error-${DateTime.now().millisecondsSinceEpoch}',
-            text: errorMessage,
-            isUser: false,
-            timestamp: DateTime.now(),
-          ));
-        });
-        
-        // Scroll to bottom after error message
-        _scrollToBottom();
-      }
-    }
   }
 }
 

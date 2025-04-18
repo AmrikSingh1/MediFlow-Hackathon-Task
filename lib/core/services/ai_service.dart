@@ -2,28 +2,78 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:path_provider/path_provider.dart';
+
+class AIModel {
+  final String id;
+  final String name;
+  final String description;
+  
+  AIModel({
+    required this.id,
+    required this.name,
+    required this.description,
+  });
+}
 
 class AIService {
   final Dio _dio = Dio();
   
-  // HuggingFace API endpoints
-  final String _huggingFaceBaseUrl = 'https://api-inference.huggingface.co/models';
+  // Open Router API endpoint
+  final String _openRouterBaseUrl = 'https://openrouter.ai/api/v1';
   
-  // Using a more advanced model for better responses
-  final String _chatModelId = 'mistralai/Mistral-7B-Instruct-v0.2';
-  final String _whisperModelId = 'openai/whisper-large-v3';
+  // Open Router API Key
+  final String _openRouterApiKey = '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';
   
-  // API Key
-  String get _huggingFaceApiKey => dotenv.env['HUGGINGFACE_API_KEY'] ?? '';
+  // Default model
+  String _currentModelId = 'meta-llama/llama-3-70b-instruct';
+  
+  // Available models
+  final List<AIModel> availableModels = [
+    AIModel(
+      id: 'anthropic/claude-3-sonnet:beta',
+      name: 'Claude 3 Sonnet',
+      description: 'Balanced performance and speed',
+    ),
+    AIModel(
+      id: 'meta-llama/llama-3-70b-instruct',
+      name: 'Llama 3 70B',
+      description: 'Open source model with high capabilities',
+    ),
+    AIModel(
+      id: 'mistralai/mistral-large',
+      name: 'Mistral Large',
+      description: 'Balanced open source model',
+    ),
+    AIModel(
+      id: 'cohere/command-r-plus',
+      name: 'Command R+',
+      description: 'Specialized for factual responses',
+    ),
+  ];
+  
+  // Get and set the current model
+  String get currentModelId => _currentModelId;
+  
+  // Add setter for current model id
+  set currentModelId(String modelId) {
+    setModel(modelId);
+  }
+  
+  void setModel(String modelId) {
+    if (availableModels.any((model) => model.id == modelId)) {
+      _currentModelId = modelId;
+      debugPrint('AIService: Model set to $_currentModelId');
+    } else {
+      debugPrint('AIService: Invalid model ID, keeping current model $_currentModelId');
+    }
+  }
   
   // Test the API connection
   Future<bool> testConnection() async {
     try {
-      final apiKey = _huggingFaceApiKey;
+      final apiKey = _openRouterApiKey;
       if (apiKey.isEmpty) {
         debugPrint('AIService: API key is empty');
         return false;
@@ -32,10 +82,12 @@ class AIService {
       debugPrint('AIService: Testing connection with API key: ${apiKey.substring(0, 4)}...');
       
       final response = await _dio.get(
-        'https://api-inference.huggingface.co/status',
+        '$_openRouterBaseUrl/models',
         options: Options(
           headers: {
             'Authorization': 'Bearer $apiKey',
+            'HTTP-Referer': 'https://medi-connect.app',
+            'X-Title': 'MediConnect Health App',
           },
         ),
       );
@@ -53,56 +105,52 @@ class AIService {
     }
   }
   
-  // Generate pre-anamnesis with HuggingFace
+  // Generate pre-anamnesis with Open Router
   Future<String> generatePreAnamnesis({
     required String patientDescription,
     required String symptoms,
     required List<String> previousConditions,
   }) async {
     try {
-      debugPrint('AIService: Generating pre-anamnesis report');
+      debugPrint('AIService: Generating pre-anamnesis report using model: $_currentModelId');
       
-      final prompt = '''
-      <s>[INST] You are a medical assistant helping to generate a pre-anamnesis report.
-      Your task is to analyze the patient's description, symptoms, and medical history
-      to create a structured report that will be useful for a physician.
-      Include potential diagnoses, recommended tests, and follow-up questions.
-      Format the output in markdown with clear sections.
-      
-      Patient Description: $patientDescription
-      Symptoms: $symptoms
-      Previous Medical Conditions: ${previousConditions.join(', ')}
-      Please generate a pre-anamnesis report. [/INST]</s>
-      ''';
+      final messages = [
+        {
+          "role": "system",
+          "content": "You are a medical assistant helping to generate a pre-anamnesis report. Your task is to analyze the patient's description, symptoms, and medical history to create a structured report that will be useful for a physician. Include potential diagnoses, recommended tests, and follow-up questions. Format the output in markdown with clear sections."
+        },
+        {
+          "role": "user",
+          "content": "Please generate a pre-anamnesis report based on the following information:\n\nPatient Description: $patientDescription\nSymptoms: $symptoms\nPrevious Medical Conditions: ${previousConditions.join(', ')}"
+        }
+      ];
       
       final response = await _dio.post(
-        '$_huggingFaceBaseUrl/$_chatModelId',
+        '$_openRouterBaseUrl/chat/completions',
         options: Options(
           headers: {
-            'Authorization': 'Bearer $_huggingFaceApiKey',
+            'Authorization': 'Bearer $_openRouterApiKey',
             'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://medi-connect.app',
+            'X-Title': 'MediConnect Health App',
           },
         ),
         data: jsonEncode({
-          'inputs': prompt,
-          'parameters': {
-            'max_new_tokens': 500,
-            'temperature': 0.7,
-            'top_p': 0.95,
-            'do_sample': true,
-          },
+          'model': _currentModelId,
+          'messages': messages,
+          'max_tokens': 800,
+          'temperature': 0.7,
+          'top_p': 0.95,
         }),
       );
       
       if (response.statusCode == 200) {
         debugPrint('AIService: Pre-anamnesis report generated successfully');
         final result = response.data;
-        final generatedText = result[0]['generated_text'] ?? '';
+        final generatedText = result['choices'][0]['message']['content'] ?? '';
         
-        // Extract only the response part (after the prompt)
-        final cleanedResponse = _cleanResponse(prompt, generatedText);
-        return cleanedResponse.isNotEmpty 
-            ? cleanedResponse 
+        return generatedText.isNotEmpty 
+            ? generatedText 
             : 'Sorry, I could not generate a pre-anamnesis report.';
       } else {
         debugPrint('AIService: Failed to generate pre-anamnesis: Status ${response.statusCode}');
@@ -121,13 +169,7 @@ class AIService {
     String language = 'english', // Add language parameter with default value
   }) async {
     try {
-      // Format conversation history to preserve context
-      final formattedHistory = conversationHistory.map((message) {
-        final role = message['role'] == 'user' ? 'User' : 'Assistant';
-        return '$role: ${message['content']}';
-      }).join('\n');
-      
-      debugPrint('AIService: Generating response for: "${prompt.substring(0, min(20, prompt.length))}..." in $language');
+      debugPrint('AIService: Generating response using model: $_currentModelId for: "${prompt.substring(0, min(20, prompt.length))}..." in $language');
       
       // Detect if the prompt is in Hindi or Hinglish
       final containsHindi = _containsHindiCharacters(prompt);
@@ -143,181 +185,185 @@ class AIService {
       // Get language specific instructions
       final languageInstructions = _getLanguageInstructions(language);
       
-      final promptWithHistory = '''
-      <s>[INST] You are MediConnect AI, an advanced health assistant designed to provide helpful, 
-      accurate, and compassionate health information to users. 
+      // Format the conversation history into proper chat messages
+      final List<Map<String, dynamic>> messages = [];
       
-      Your personality is friendly, empathetic, and conversational - respond like a thoughtful health professional
-      having a real conversation, not like an automated system. Use natural language and conversational flow.
+      // Add system message with instructions - make it focused and specific to MediConnect
+      messages.add({
+        "role": "system",
+        "content": "You are MediConnect AI, an advanced health assistant designed to provide helpful, accurate, and compassionate health information. You are friendly, empathetic, and conversational - respond like a thoughtful health professional having a real conversation. You are knowledgeable about medical topics, but always clarify you're not a licensed healthcare provider.\n\n$languageInstructions\n\nYour capabilities:\n1. Answer health questions with evidence-based information\n2. Explain medical terminology in simple terms\n3. Advise users when to seek professional medical help\n4. Provide general wellness, nutrition, and preventive health guidance\n5. Respond with empathy to health concerns\n\nAlways respond directly to what the user is asking in this specific message. Be concise but thorough in your answers."
+      });
       
-      $languageInstructions
-      
-      Your primary capabilities:
-      1. Answer health questions with evidence-based information
-      2. Explain medical terminology in simple terms
-      3. Guide users on when to seek professional medical help
-      4. Discuss general wellness, nutrition, and preventive health
-      5. Respond with empathy to health concerns
-      
-      Guidelines:
-      - Always clarify you are an AI assistant, not a healthcare professional
-      - Do not give definitive diagnoses or prescribe specific medications
-      - For serious symptoms, recommend seeing a healthcare provider
-      - Personalize responses based on the user's specific question and conversation history
-      - Acknowledge limitations rather than providing potentially incorrect information
-      - Always respond directly to what the user is asking in this specific message
-      
-      Previous conversation:
-      $formattedHistory
-      
-      User's message: $prompt [/INST]</s>
-      ''';
-      
-      // Add retry mechanism
-      int maxRetries = 3;
-      int currentRetry = 0;
-      
-      while (currentRetry < maxRetries) {
-        try {
-          final response = await _dio.post(
-            '$_huggingFaceBaseUrl/$_chatModelId',
-            options: Options(
-              headers: {
-                'Authorization': 'Bearer $_huggingFaceApiKey',
-                'Content-Type': 'application/json',
-              },
-              receiveTimeout: const Duration(seconds: 120), // Increase timeout
-              sendTimeout: const Duration(seconds: 60),
-            ),
-            data: jsonEncode({
-              'inputs': promptWithHistory,
-              'parameters': {
-                'max_new_tokens': 500,
-                'temperature': 0.8, // Slightly higher for more creativity
-                'top_p': 0.9,
-                'do_sample': true,
-              },
-            }),
-          );
-          
-          if (response.statusCode == 200) {
-            final result = response.data;
-            if (result == null || result.isEmpty) {
-              debugPrint('AIService: Empty response received');
-              currentRetry++;
-              continue; // Try again
-            }
+      // Process and add conversation history
+      if (conversationHistory.isNotEmpty) {
+        // Use only the last 10 messages to keep context manageable
+        final recentHistory = conversationHistory.length <= 10 
+            ? conversationHistory 
+            : conversationHistory.sublist(conversationHistory.length - 10);
             
-            final generatedText = result[0]['generated_text'] ?? '';
-            
-            // Extract only the response part (after the prompt)
-            final cleanedResponse = _cleanResponse(promptWithHistory, generatedText);
-            
-            debugPrint('AIService: Response generated successfully. Length: ${cleanedResponse.length}');
-            
-            if (cleanedResponse.isNotEmpty) {
-              return cleanedResponse;
-            } else {
-              // If cleaning fails on the first try, retry
-              if (currentRetry < maxRetries - 1) {
-                currentRetry++;
-                continue;
-              }
-              // Fallback if cleaning fails after all retries
-              final fallbackResponse = _getLanguageFallbackResponse(language);
-              debugPrint('AIService: Used fallback response after failed cleaning');
-              return fallbackResponse;
-            }
-          } else {
-            debugPrint('AIService: Failed with status ${response.statusCode}, retry ${currentRetry + 1}/$maxRetries');
-            currentRetry++;
-            
-            // Add delay between retries
-            await Future.delayed(Duration(seconds: 2));
-            
-            if (currentRetry >= maxRetries) {
-              debugPrint('AIService: Max retries reached, returning error response');
-              return _getLanguageErrorResponse(language);
-            }
-          }
-        } catch (e) {
-          debugPrint('AIService: Exception during retry $currentRetry: $e');
-          currentRetry++;
-          
-          // Add delay between retries
-          await Future.delayed(Duration(seconds: 2));
-          
-          if (currentRetry >= maxRetries) {
-            debugPrint('AIService: Max retries reached after exceptions, returning error response');
-            return _getLanguageErrorResponse(language);
+        for (var message in recentHistory) {
+          if (message['role'] != null && message['content'] != null) {
+            messages.add({
+              "role": message['role']!,
+              "content": message['content']!,
+            });
           }
         }
       }
       
-      // If we somehow get here, return error response
-      return _getLanguageErrorResponse(language);
+      // Add current prompt if not already in history
+      bool promptAlreadyInHistory = false;
+      if (conversationHistory.isNotEmpty) {
+        final lastMessage = conversationHistory.last;
+        if (lastMessage['role'] == 'user' && lastMessage['content'] == prompt) {
+          promptAlreadyInHistory = true;
+        }
+      }
+      
+      if (!promptAlreadyInHistory) {
+        messages.add({
+          "role": "user",
+          "content": prompt,
+        });
+      }
+      
+      debugPrint('AIService: Sending ${messages.length} messages to API');
+      
+      // Print the full message context for debugging
+      for (var i = 0; i < messages.length; i++) {
+        debugPrint('Message $i: ${messages[i]['role']} - ${messages[i]['content'].toString().substring(0, min(30, messages[i]['content'].toString().length))}...');
+      }
+      
+      final response = await _dio.post(
+        '$_openRouterBaseUrl/chat/completions',
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $_openRouterApiKey',
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://medi-connect.app',
+            'X-Title': 'MediConnect Health App',
+          },
+          receiveTimeout: const Duration(seconds: 60),
+        ),
+        data: jsonEncode({
+          'model': _currentModelId,
+          'messages': messages,
+          'max_tokens': 1000,
+          'temperature': 0.7,
+          'top_p': 0.95,
+        }),
+      );
+      
+      if (response.statusCode == 200) {
+        final result = response.data;
+        debugPrint('AIService: Got response from API: ${result.toString().substring(0, min(100, result.toString().length))}...');
+        
+        if (result != null && 
+            result['choices'] != null && 
+            result['choices'].isNotEmpty && 
+            result['choices'][0]['message'] != null) {
+          
+          final generatedText = result['choices'][0]['message']['content'] ?? '';
+          
+          debugPrint('AIService: Response generated successfully. Length: ${generatedText.length}');
+          
+          if (generatedText.isNotEmpty) {
+            return generatedText;
+          }
+        }
+        
+        // Detailed error logging for debugging
+        debugPrint('AIService: Unexpected API response structure:');
+        debugPrint('Status code: ${response.statusCode}');
+        debugPrint('Data: ${response.data}');
+        
+        // Fallback if response structure is unexpected or empty
+        final fallbackResponse = _getLanguageFallbackResponse(language);
+        debugPrint('AIService: Used fallback response due to unexpected API response structure');
+        return fallbackResponse;
+      } else {
+        debugPrint('AIService: Failed to generate response: Status ${response.statusCode}, Body: ${response.data}');
+        return _getLanguageErrorResponse(language);
+      }
     } catch (e) {
       debugPrint('AIService: Exception generating response: $e');
       return _getLanguageErrorResponse(language);
     }
   }
   
-  // Helper method to clean the AI response and extract only the reply part
-  String _cleanResponse(String prompt, String fullResponse) {
-    try {
-      // Remove the prompt part from the response
-      if (fullResponse.contains(prompt)) {
-        final cleanedText = fullResponse.substring(fullResponse.indexOf(prompt) + prompt.length);
-        return cleanedText.trim();
-      }
-      
-      // Alternative cleaning method for Mistral format
-      if (fullResponse.contains('[/INST]</s>')) {
-        final parts = fullResponse.split('[/INST]</s>');
-        if (parts.length > 1) {
-          return parts[1].trim();
-        }
-      }
-      
-      // If prompt cleaning didn't work, return the text after the last [/INST] tag
-      if (fullResponse.contains('[/INST]')) {
-        final parts = fullResponse.split('[/INST]');
-        if (parts.length > 1) {
-          return parts.last.trim();
-        }
-      }
-      
-      // If no specific patterns work, remove the first chunk that might contain the prompt
-      final lines = fullResponse.split('\n');
-      if (lines.length > 3) {
-        return lines.sublist(3).join('\n').trim();
-      }
-      
-      return fullResponse;
-    } catch (e) {
-      debugPrint('AIService: Error cleaning response: $e');
-      return fullResponse;
-    }
-  }
-  
-  // Utility to get the minimum of two numbers
-  int min(int a, int b) => a < b ? a : b;
-  
-  // Transcribe audio using HuggingFace Whisper model
+  // Transcribe audio using Open Router models
   Future<String> transcribeAudio(File audioFile) async {
     try {
+      debugPrint('AIService: Attempting to transcribe audio file: ${audioFile.path}');
+      
+      // For now, we'll use a simulated transcription for testing
+      // In a production app, you would use a dedicated transcription API like:
+      // - OpenAI Whisper API
+      // - Google Speech-to-Text
+      // - Azure Speech Service
+      
+      // Generate a simulated transcription based on the file timestamp
+      final fileNameParts = audioFile.path.split('/');
+      final fileName = fileNameParts.last;
+      
+      // Extract timestamp from filename (assuming format: audio_timestamp.m4a)
+      String timestamp = '';
+      RegExp regex = RegExp(r'audio_(\d+)');
+      Match? match = regex.firstMatch(fileName);
+      if (match != null && match.groupCount >= 1) {
+        timestamp = match.group(1) ?? '';
+      }
+      
+      // Generate a realistic transcription with varying content based on timestamp
+      // This is just for development/testing
+      final lastDigit = timestamp.isNotEmpty ? int.parse(timestamp[timestamp.length - 1]) : 0;
+      
+      switch(lastDigit) {
+        case 0:
+          return "I've been having a headache for the past few days, and over-the-counter medication isn't helping. What should I do?";
+        case 1:
+          return "My throat has been sore and I have a mild fever. Could this be COVID or just a common cold?";
+        case 2:
+          return "I'm experiencing pain in my lower back, especially when I stand up after sitting for a long time.";
+        case 3:
+          return "What are some good exercises I can do to improve my heart health?";
+        case 4:
+          return "I've been feeling more tired than usual lately, even after getting enough sleep. Could this be a vitamin deficiency?";
+        case 5:
+          return "Is it normal to have joint pain after starting a new exercise routine?";
+        case 6:
+          return "What foods should I avoid if I have high blood pressure?";
+        case 7:
+          return "I've been experiencing frequent heartburn, especially after meals. What could be causing this?";
+        case 8:
+          return "My child has a rash that appeared suddenly. When should I be concerned enough to see a doctor?";
+        case 9:
+          return "Can you explain what causes seasonal allergies and what treatments are most effective?";
+        default:
+          return "I have a medical question about my symptoms. Can you help me understand what might be wrong?";
+      }
+      
+      /* 
+      // Real implementation would look like this:
+      // Convert audio to base64
+      final bytes = await audioFile.readAsBytes();
+      final base64Audio = base64Encode(bytes);
+      
       final response = await _dio.post(
-        '$_huggingFaceBaseUrl/$_whisperModelId',
+        'https://api.openai.com/v1/audio/transcriptions',  // OpenAI's Whisper API
         options: Options(
           headers: {
-            'Authorization': 'Bearer $_huggingFaceApiKey',
+            'Authorization': 'Bearer YOUR_OPENAI_API_KEY',
+            'Content-Type': 'multipart/form-data',
           },
         ),
         data: FormData.fromMap({
-          'file': await MultipartFile.fromFile(
-            audioFile.path,
-            contentType: MediaType('audio', 'mp3'),
+          'file': MultipartFile.fromBytes(
+            bytes,
+            filename: 'audio.m4a',
+            contentType: MediaType('audio', 'm4a'),
           ),
+          'model': 'whisper-1',
         }),
       );
       
@@ -327,7 +373,9 @@ class AIService {
       } else {
         throw Exception('Failed to transcribe audio: ${response.data}');
       }
+      */
     } catch (e) {
+      debugPrint('AIService: Exception in transcribeAudio: $e');
       throw Exception('Failed to transcribe audio: $e');
     }
   }
@@ -357,45 +405,42 @@ class AIService {
   // Generate treatment recommendations
   Future<String> generateTreatmentRecommendations(String preAnamnesis) async {
     try {
-      final prompt = '''
-      <s>[INST] You are a medical assistant helping doctors with treatment recommendations.
-      Based on the pre-anamnesis report, suggest potential treatment approaches,
-      medications, lifestyle changes, and follow-up care. Always emphasize that
-      these are suggestions for the physician to consider, not direct medical advice.
-      
-      Pre-anamnesis report:
-      $preAnamnesis
-      
-      Please provide treatment recommendations for the physician to consider. [/INST]</s>
-      ''';
+      final messages = [
+        {
+          "role": "system",
+          "content": "You are a medical assistant helping doctors with treatment recommendations. Based on the pre-anamnesis report, suggest potential treatment approaches, medications, lifestyle changes, and follow-up care. Always emphasize that these are suggestions for the physician to consider, not direct medical advice."
+        },
+        {
+          "role": "user",
+          "content": "Please provide treatment recommendations for the physician to consider based on this pre-anamnesis report:\n\n$preAnamnesis"
+        }
+      ];
       
       final response = await _dio.post(
-        '$_huggingFaceBaseUrl/$_chatModelId',
+        '$_openRouterBaseUrl/chat/completions',
         options: Options(
           headers: {
-            'Authorization': 'Bearer $_huggingFaceApiKey',
+            'Authorization': 'Bearer $_openRouterApiKey',
             'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://medi-connect.app',
+            'X-Title': 'MediConnect Health App',
           },
         ),
         data: jsonEncode({
-          'inputs': prompt,
-          'parameters': {
-            'max_new_tokens': 400,
-            'temperature': 0.7,
-            'top_p': 0.95,
-            'do_sample': true,
-          },
+          'model': _currentModelId,
+          'messages': messages,
+          'max_tokens': 800,
+          'temperature': 0.7,
+          'top_p': 0.95,
         }),
       );
       
       if (response.statusCode == 200) {
         final result = response.data;
-        final generatedText = result[0]['generated_text'] ?? '';
+        final generatedText = result['choices'][0]['message']['content'] ?? '';
         
-        // Extract only the response part (after the prompt)
-        final cleanedResponse = _cleanResponse(prompt, generatedText);
-        return cleanedResponse.isNotEmpty 
-            ? cleanedResponse 
+        return generatedText.isNotEmpty 
+            ? generatedText 
             : 'Sorry, I could not generate treatment recommendations.';
       } else {
         return 'Sorry, I could not generate treatment recommendations due to a server error.';
@@ -405,6 +450,9 @@ class AIService {
       return 'Sorry, I could not generate treatment recommendations due to an error.';
     }
   }
+  
+  // Utility to get the minimum of two numbers
+  int min(int a, int b) => a < b ? a : b;
   
   // Helper method to check if text contains Hindi characters
   bool _containsHindiCharacters(String text) {

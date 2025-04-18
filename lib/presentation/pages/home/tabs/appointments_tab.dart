@@ -52,6 +52,9 @@ class _AppointmentsTabState extends ConsumerState<AppointmentsTab> with TickerPr
   late List<DateTime> _calendarDates;
   final ScrollController _scrollController = ScrollController();
   
+  // Set of dates that have appointments
+  Set<String> _datesWithAppointments = {};
+  
   @override
   void initState() {
     super.initState();
@@ -70,6 +73,8 @@ class _AppointmentsTabState extends ConsumerState<AppointmentsTab> with TickerPr
       _refreshData();
       // Scroll to today's date
       _scrollToSelectedDate();
+      // Update dates with appointments
+      _updateDatesWithAppointments();
     });
   }
   
@@ -121,12 +126,45 @@ class _AppointmentsTabState extends ConsumerState<AppointmentsTab> with TickerPr
         ref.refresh(cancelledAppointmentsProvider);
         break;
     }
+    
+    // After refreshing data, update dates with appointments
+    _updateDatesWithAppointments();
+  }
+  
+  // Update the set of dates that have appointments
+  void _updateDatesWithAppointments() {
+    // Wait for the upcoming appointments data to be available
+    ref.watch(upcomingAppointmentsProvider).whenData((appointments) {
+      _datesWithAppointments = appointments.map((appointment) {
+        final date = appointment.date.toDate();
+        return DateFormat('yyyy-MM-dd').format(date);
+      }).toSet();
+      
+      debugPrint('AppointmentsTab: Updated dates with appointments: $_datesWithAppointments');
+      
+      if (mounted) {
+        setState(() {});
+      }
+    });
   }
   
   void _onDateSelected(DateTime date) {
+    final dateStr = DateFormat('yyyy-MM-dd').format(date);
+    debugPrint('AppointmentsTab: Date selected: $dateStr');
+    
     setState(() {
       _selectedDate = date;
     });
+    
+    // Always refresh data regardless of tab
+    ref.refresh(upcomingAppointmentsProvider);
+    
+    // For dates with appointments, make sure we're on the "Upcoming" tab
+    if (_datesWithAppointments.contains(dateStr) && _tabController.index != 0) {
+      _tabController.animateTo(0); // Switch to "Upcoming" tab
+    }
+    
+    // Update calendar view and appointment lists
     _refreshData();
   }
 
@@ -208,6 +246,10 @@ class _AppointmentsTabState extends ConsumerState<AppointmentsTab> with TickerPr
                             date.month == DateTime.now().month && 
                             date.year == DateTime.now().year;
                 
+                // Check if this date has appointments
+                final dateStr = DateFormat('yyyy-MM-dd').format(date);
+                final hasAppointments = _datesWithAppointments.contains(dateStr);
+                
                 return GestureDetector(
                   onTap: () => _onDateSelected(date),
                   child: Container(
@@ -216,6 +258,9 @@ class _AppointmentsTabState extends ConsumerState<AppointmentsTab> with TickerPr
                     decoration: BoxDecoration(
                       color: isSelected ? AppColors.primary : Colors.transparent,
                       borderRadius: BorderRadius.circular(10),
+                      border: hasAppointments && !isSelected 
+                          ? Border.all(color: AppColors.primary.withOpacity(0.7), width: 1.5)
+                          : null,
                     ),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -235,10 +280,21 @@ class _AppointmentsTabState extends ConsumerState<AppointmentsTab> with TickerPr
                           style: TextStyle(
                             fontSize: 15,
                             color: isSelected ? Colors.white : 
-                                  isToday ? AppColors.primary : Colors.black,
-                            fontWeight: isSelected || isToday ? FontWeight.bold : FontWeight.normal,
+                                  isToday ? AppColors.primary : 
+                                  hasAppointments ? AppColors.primary.withOpacity(0.8) : Colors.black,
+                            fontWeight: isSelected || isToday || hasAppointments ? FontWeight.bold : FontWeight.normal,
                           ),
                         ),
+                        if (hasAppointments && !isSelected)
+                          Container(
+                            margin: const EdgeInsets.only(top: 4),
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withOpacity(0.8),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -280,13 +336,72 @@ class _AppointmentsTabState extends ConsumerState<AppointmentsTab> with TickerPr
         final filteredAppointments = tabIndex == 0
             ? appointments.where((appointment) {
                 final appointmentDate = appointment.date.toDate();
-                return appointmentDate.day == _selectedDate.day &&
-                       appointmentDate.month == _selectedDate.month &&
-                       appointmentDate.year == _selectedDate.year;
+                
+                // Convert both dates to string format for comparison to ignore time
+                final appointmentDateString = DateFormat('yyyy-MM-dd').format(appointmentDate);
+                final selectedDateString = DateFormat('yyyy-MM-dd').format(_selectedDate);
+                
+                // Compare date strings instead of date objects
+                return appointmentDateString == selectedDateString;
               }).toList()
             : appointments;
-            
+        
+        debugPrint("All appointments count: ${appointments.length}");
+        debugPrint("Filtered appointments for ${DateFormat('yyyy-MM-dd').format(_selectedDate)} count: ${filteredAppointments.length}");
+        
+        // Log all appointment dates for debugging
+        if (appointments.isNotEmpty) {
+          debugPrint("All appointment dates:");
+          for (var appointment in appointments) {
+            final dateStr = DateFormat('yyyy-MM-dd').format(appointment.date.toDate());
+            debugPrint(" - $dateStr (${appointment.time})");
+          }
+        }
+        
         if (filteredAppointments.isEmpty) {
+          // Check if there are any appointments but none on this date
+          if (appointments.isNotEmpty && tabIndex == 0) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.event_outlined, size: 64, color: Colors.grey.shade400),
+                  const SizedBox(height: 16),
+                  Text(
+                    "No appointments on ${DateFormat('EEEE, MMMM d, yyyy').format(_selectedDate)}",
+                    style: AppTypography.bodyLarge.copyWith(
+                      color: Colors.grey.shade600,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "You have ${appointments.length} upcoming appointment(s) on other dates",
+                    style: AppTypography.bodyMedium.copyWith(
+                      color: AppColors.primary,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 32),
+                    child: OutlinedButton.icon(
+                      onPressed: () => _navigateToBookAppointment(),
+                      icon: const Icon(Icons.add_circle_outline, size: 18),
+                      label: const Text('Book Appointment'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primary,
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
           return _buildEmptyState(tabIndex);
         }
         

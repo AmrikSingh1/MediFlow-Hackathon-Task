@@ -8,6 +8,14 @@ import 'package:medi_connect/core/services/auth_service.dart';
 import 'package:medi_connect/presentation/widgets/gradient_button.dart';
 import 'package:medi_connect/presentation/widgets/custom_text_field.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
+import 'package:medi_connect/core/services/firebase_service.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
+// Add provider definition
+final firebaseServiceProvider = Provider<FirebaseService>((ref) => FirebaseService());
 
 class PatientProfilePage extends ConsumerStatefulWidget {
   const PatientProfilePage({super.key});
@@ -36,8 +44,13 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
   
   bool _isLoading = false;
   bool _isLoadingData = true;
+  bool _isImageLoading = false;
   UserModel? _currentUser;
   final List<String> _genders = ['Male', 'Female', 'Other', 'Prefer not to say'];
+  
+  // Profile image picker
+  File? _profileImageFile;
+  bool _isUploadingImage = false;
   
   @override
   void initState() {
@@ -358,11 +371,20 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
                     ),
                   ],
                 ),
-                child: const Icon(
-                  Icons.person,
-                  size: 60,
-                  color: Color(0xFF8A70D6),
-                ),
+                child: _profileImageFile == null
+                    ? const Icon(
+                        Icons.person,
+                        size: 60,
+                        color: Color(0xFF8A70D6),
+                      )
+                    : ClipOval(
+                        child: Image.file(
+                          _profileImageFile!,
+                          width: 100,
+                          height: 100,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
               ),
               Positioned(
                 bottom: 0,
@@ -398,7 +420,7 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
                       size: 18,
                     ),
                     onPressed: () {
-                      _showImageSourceDialog();
+                      _showImageSourceOptions();
                     },
                   ),
                 ),
@@ -410,103 +432,181 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
     );
   }
   
-  void _showImageSourceDialog() {
-    showModalBottomSheet(
+  Future<void> _showImageSourceOptions() async {
+    final ImagePicker imagePicker = ImagePicker();
+    
+    await showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Profile Photo',
-              style: AppTypography.titleMedium.copyWith(
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFF2D3748),
-              ),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+      backgroundColor: Theme.of(context).cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                _buildImageSourceOption(
-                  icon: Icons.photo_library,
-                  label: 'Gallery',
-                  onTap: () {
-                    // TODO: Implement gallery picker
+                ListTile(
+                  leading: const Icon(Icons.photo_library_rounded),
+                  title: const Text('Gallery'),
+                  onTap: () async {
                     Navigator.pop(context);
+                    await _pickImage(ImageSource.gallery);
                   },
                 ),
-                _buildImageSourceOption(
-                  icon: Icons.camera_alt,
-                  label: 'Camera',
-                  onTap: () {
-                    // TODO: Implement camera picker
+                ListTile(
+                  leading: const Icon(Icons.camera_alt_rounded),
+                  title: const Text('Camera'),
+                  onTap: () async {
                     Navigator.pop(context);
+                    await _pickImage(ImageSource.camera);
                   },
                 ),
-                _buildImageSourceOption(
-                  icon: Icons.delete,
-                  label: 'Remove',
-                  color: Colors.red.shade300,
-                  onTap: () {
-                    // TODO: Implement photo removal
-                    Navigator.pop(context);
-                  },
-                ),
+                if (_currentUser?.profileImageUrl != null) 
+                  ListTile(
+                    leading: const Icon(Icons.delete_outline_rounded, color: Colors.red),
+                    title: const Text('Remove photo', style: TextStyle(color: Colors.red)),
+                    onTap: () async {
+                      Navigator.pop(context);
+                      await _removeProfileImage();
+                    },
+                  ),
               ],
             ),
-            const SizedBox(height: 16),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
   
-  Widget _buildImageSourceOption({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    Color? color,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              height: 60,
-              width: 60,
-              decoration: BoxDecoration(
-                color: (color ?? const Color(0xFF8A70D6)).withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                icon,
-                color: color ?? const Color(0xFF8A70D6),
-                size: 30,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: AppTypography.bodyMedium.copyWith(
-                color: const Color(0xFF2D3748),
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
-      ),
+  Future<void> _pickImage(ImageSource source) async {
+    final ImagePicker imagePicker = ImagePicker();
+    final XFile? pickedFile = await imagePicker.pickImage(
+      source: source,
+      imageQuality: 80,
     );
+    
+    if (pickedFile != null && mounted) {
+      setState(() {
+        _isImageLoading = true;
+        _profileImageFile = File(pickedFile.path);
+      });
+      
+      try {
+        final String? uploadedUrl = await _uploadProfileImage(_profileImageFile!);
+        if (uploadedUrl != null && mounted) {
+          setState(() {
+            _currentUser = _currentUser?.copyWith(profileImageUrl: uploadedUrl);
+            _isImageLoading = false;
+          });
+          
+          // Update user profile in Firebase
+          await _uploadImageToFirebase(uploadedUrl);
+          
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Profile picture updated successfully')),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _isImageLoading = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to update profile picture: ${e.toString()}')),
+          );
+        }
+      }
+    }
+  }
+  
+  Future<void> _uploadImageToFirebase(String imageUrl) async {
+    try {
+      if (_currentUser == null || _currentUser!.id.isEmpty) {
+        throw Exception('User not authenticated');
+      }
+      
+      final updatedUser = _currentUser!.copyWith(profileImageUrl: imageUrl);
+      final firebaseService = ref.read(firebaseServiceProvider);
+      await firebaseService.updateUser(updatedUser);
+    } catch (e) {
+      debugPrint('Error updating user profile with image: $e');
+      throw e;
+    }
+  }
+  
+  Future<String?> _uploadProfileImage(File imageFile) async {
+    try {
+      if (_currentUser == null || _currentUser!.id.isEmpty) {
+        throw Exception('User not authenticated');
+      }
+      
+      final String fileName = '${_currentUser!.id}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final Reference storageRef = FirebaseStorage.instance.ref().child('profile_images/$fileName');
+      
+      final UploadTask uploadTask = storageRef.putFile(imageFile);
+      final TaskSnapshot taskSnapshot = await uploadTask;
+      
+      final String downloadUrl = await taskSnapshot.ref.getDownloadURL();
+      return downloadUrl;
+    } catch (e) {
+      debugPrint('Error uploading profile image: $e');
+      return null;
+    }
+  }
+  
+  Future<void> _removeProfileImage() async {
+    if (!mounted) return;
+    
+    setState(() {
+      _isImageLoading = true;
+    });
+    
+    try {
+      // Remove the profile image from Firebase Storage
+      User? user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final storageRef = FirebaseStorage.instance.ref();
+        final profileImageRef = storageRef.child('profile_images/${user.uid}.jpg');
+        
+        try {
+          await profileImageRef.delete();
+        } catch (e) {
+          // If the file doesn't exist, just continue
+        }
+        
+        // Update user data in Firestore
+        final updatedUser = _currentUser!.copyWith(profileImageUrl: null);
+        final firebaseService = ref.read(firebaseServiceProvider);
+        await firebaseService.updateUser(updatedUser);
+        
+        setState(() {
+          _currentUser = updatedUser;
+          _profileImageFile = null;
+          _isUploadingImage = false;
+          _isImageLoading = false;
+        });
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Profile picture removed successfully')),
+          );
+        }
+      }
+    } catch (e) {
+      setState(() {
+        _isImageLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error removing image: ${e.toString()}')),
+        );
+      }
+    }
   }
   
   Widget _buildProfileForm() {

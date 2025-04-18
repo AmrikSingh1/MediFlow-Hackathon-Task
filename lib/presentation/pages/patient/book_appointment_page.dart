@@ -20,25 +20,13 @@ final availableDoctorsProvider = FutureProvider.autoDispose<List<DoctorModel>>((
   return await firebaseService.getDoctorsFromCollection();
 });
 
-// Provider for available doctors by specialty with caching
+// Provider for available doctors by specialty
 final specialtyDoctorsProvider = FutureProvider.family<List<DoctorModel>, String>((ref, specialty) async {
   final firebaseService = ref.read(firebaseServiceProvider);
-  final cacheProvider = ref.read(doctorCacheProvider);
-  
-  // Check if we already have the doctors for this specialty in cache
-  if (cacheProvider.hasSpecialty(specialty)) {
-    return cacheProvider.getDoctorsBySpecialty(specialty);
+  if (specialty.isEmpty) {
+    return await firebaseService.getDoctorsFromCollection();
   }
-  
-  // If not in cache, fetch from Firebase
-  final doctors = await firebaseService.getDoctorsFromCollection(
-    specialty: specialty.isEmpty ? null : specialty
-  );
-  
-  // Store in cache for future use
-  cacheProvider.cacheDoctors(specialty, doctors);
-  
-  return doctors;
+  return await firebaseService.getDoctorsFromCollection(specialty: specialty);
 });
 
 // Provider for available slots for a specific doctor on a specific date
@@ -48,42 +36,6 @@ final availableSlotsProvider = FutureProvider.family<List<AppointmentSlotModel>,
   final date = params['date'] as DateTime;
   return await firebaseService.getAvailableSlotsForDoctor(doctorId, date);
 });
-
-// Provider for caching doctors
-final doctorCacheProvider = Provider<DoctorCacheService>((ref) {
-  return DoctorCacheService();
-});
-
-// Cache service for doctors
-class DoctorCacheService {
-  final Map<String, List<DoctorModel>> _specialtyCache = {};
-  final Map<String, DoctorModel> _doctorCache = {};
-  
-  // Check if we have doctors for this specialty
-  bool hasSpecialty(String specialty) {
-    return _specialtyCache.containsKey(specialty);
-  }
-  
-  // Get doctors by specialty from cache
-  List<DoctorModel> getDoctorsBySpecialty(String specialty) {
-    return _specialtyCache[specialty] ?? [];
-  }
-  
-  // Store doctors in cache
-  void cacheDoctors(String specialty, List<DoctorModel> doctors) {
-    _specialtyCache[specialty] = doctors;
-    
-    // Also cache individual doctors
-    for (final doctor in doctors) {
-      _doctorCache[doctor.id] = doctor;
-    }
-  }
-  
-  // Get a doctor by ID from cache
-  DoctorModel? getDoctorById(String doctorId) {
-    return _doctorCache[doctorId];
-  }
-}
 
 class BookAppointmentPage extends ConsumerStatefulWidget {
   const BookAppointmentPage({super.key});
@@ -108,8 +60,14 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
   // List to store available slots
   List<AppointmentSlotModel> _availableSlots = [];
   
-  // Future to store the async operation for loading slots
-  Future<List<AppointmentSlotModel>>? _slotsAsync;
+  // Cache for slots - Map of doctorId-date to slots
+  Map<String, List<AppointmentSlotModel>> _slotsCache = {};
+  
+  // Loading state for slots
+  bool _isSlotsLoading = false;
+  
+  // Error message for slots loading
+  String? _slotsErrorMessage;
 
   // List of specialties
   final List<String> _specialties = [
@@ -126,115 +84,106 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
     'Dentist',
   ];
   
-  // New: Add a loading state for doctors
-  bool _isLoadingDoctors = false;
-  // New: Local cached list of doctors
-  List<DoctorModel> _availableDoctors = [];
-  
   @override
   void initState() {
     super.initState();
-    // Initialize _slotsAsync as needed
-    _updateSlotsAsync();
-    
-    // Pre-fetch doctors for common specialties
-    _preFetchDoctors();
+    // No need to call _updateSlotsAsync here as it will be called when doctor is selected
   }
 
-  // Helper method to update slots async when doctor or date changes
-  void _updateSlotsAsync() {
-    if (_selectedDoctorId != null) {
-      final params = {
-        'doctorId': _selectedDoctorId!,
-        'date': _selectedDate,
-      };
-      
+  // Optimized method to load slots with caching
+  Future<void> _loadAvailableSlots() async {
+    if (_selectedDoctorId == null) return;
+    
+    final cacheKey = '${_selectedDoctorId}-${DateFormat('yyyy-MM-dd').format(_selectedDate)}';
+    
+    // Check if slots are already in cache
+    if (_slotsCache.containsKey(cacheKey)) {
       setState(() {
-        _isLoading = true;
+        _availableSlots = _slotsCache[cacheKey]!;
+        _isSlotsLoading = false;
+        _slotsErrorMessage = null;
       });
-      
-      // Immediately get the slots to minimize perceived loading time
-      FirebaseService().getAvailableSlotsForDoctor(_selectedDoctorId!, _selectedDate)
-        .then((slots) {
-          if (mounted) {
-            setState(() {
-              _availableSlots = slots;
-              _isLoading = false;
-            });
-          }
-        }).catchError((error) {
-          if (mounted) {
-            setState(() {
-              _availableSlots = _createDefaultTimeSlots();
-              _isLoading = false;
-            });
-          }
-          debugPrint("Error pre-loading slots: $error");
-        });
-      
-      // Still use the provider for consistency
-      _slotsAsync = ref.read(availableSlotsProvider(params).future);
+      return;
     }
-  }
-
-  // Pre-fetch doctors for common specialties
-  Future<void> _preFetchDoctors() async {
-    final firebaseService = FirebaseService();
-    
-    // Pre-fetch for common specialties in background
-    for (final specialty in ['General Physician', 'Cardiologist', 'Dermatologist']) {
-      firebaseService.getDoctorsFromCollection(specialty: specialty).then((doctors) {
-        if (mounted) {
-          final cacheProvider = ref.read(doctorCacheProvider);
-          cacheProvider.cacheDoctors(specialty, doctors);
-        }
-      });
-    }
-  }
-  
-  // Helper to load doctors by specialty
-  Future<void> _loadDoctorsBySpecialty(String specialty) async {
-    if (specialty.isEmpty) return;
     
     setState(() {
-      _isLoadingDoctors = true;
+      _isSlotsLoading = true;
+      _slotsErrorMessage = null;
     });
     
     try {
-      // Check if doctors are in cache first
-      final cacheProvider = ref.read(doctorCacheProvider);
-      if (cacheProvider.hasSpecialty(specialty)) {
-        setState(() {
-          _availableDoctors = cacheProvider.getDoctorsBySpecialty(specialty);
-          _isLoadingDoctors = false;
-        });
-        return;
-      }
+      final firebaseService = ref.read(firebaseServiceProvider);
+      final slots = await firebaseService.getAvailableSlotsForDoctor(
+        _selectedDoctorId!, 
+        _selectedDate
+      );
       
-      // If not in cache, fetch them directly (faster than waiting for the provider)
-      final firebaseService = FirebaseService();
-      final doctors = await firebaseService.getDoctorsFromCollection(specialty: specialty);
+      // Filter out any booked slots - only show available ones
+      final availableSlots = slots.where((slot) => !slot.isBooked).toList();
       
-      // Cache for future use
-      cacheProvider.cacheDoctors(specialty, doctors);
+      // Sort slots by time
+      availableSlots.sort((a, b) => _compareTimeSlots(a.timeSlot, b.timeSlot));
+      
+      // Cache the result
+      _slotsCache[cacheKey] = availableSlots;
       
       if (mounted) {
         setState(() {
-          _availableDoctors = doctors;
-          _isLoadingDoctors = false;
+          _availableSlots = availableSlots;
+          _isSlotsLoading = false;
         });
       }
     } catch (e) {
-      debugPrint("Error loading doctors: $e");
+      debugPrint('Error loading slots: $e');
       if (mounted) {
         setState(() {
-          _availableDoctors = [];
-          _isLoadingDoctors = false;
+          _slotsErrorMessage = 'Failed to load time slots: $e';
+          _isSlotsLoading = false;
         });
       }
     }
   }
-
+  
+  // Helper to compare time slots for sorting
+  int _compareTimeSlots(String timeA, String timeB) {
+    // Parse times like "9:00 AM", "10:30 AM", "2:00 PM"
+    final regexTime = RegExp(r'(\d+):(\d+)\s+(AM|PM)');
+    final matchA = regexTime.firstMatch(timeA);
+    final matchB = regexTime.firstMatch(timeB);
+    
+    if (matchA == null || matchB == null) return 0;
+    
+    int hourA = int.parse(matchA.group(1)!);
+    int hourB = int.parse(matchB.group(1)!);
+    
+    // Convert to 24-hour format
+    if (matchA.group(3) == 'PM' && hourA < 12) hourA += 12;
+    if (matchA.group(3) == 'AM' && hourA == 12) hourA = 0;
+    if (matchB.group(3) == 'PM' && hourB < 12) hourB += 12;
+    if (matchB.group(3) == 'AM' && hourB == 12) hourB = 0;
+    
+    if (hourA != hourB) return hourA.compareTo(hourB);
+    
+    // Compare minutes if hours are equal
+    return int.parse(matchA.group(2)!).compareTo(int.parse(matchB.group(2)!));
+  }
+  
+  // Called when doctor or date changes
+  void _onDoctorOrDateChanged() {
+    if (_selectedDoctorId != null) {
+      _loadAvailableSlots();
+    }
+  }
+  
+  @override
+  void didUpdateWidget(covariant BookAppointmentPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Reset selection when widget updates
+    setState(() {
+      _selectedSlotId = null;
+    });
+  }
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -248,7 +197,7 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
               padding: const EdgeInsets.all(20.0),
               child: Form(
                 key: _formKey,
-                child: Column(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 12),
@@ -300,7 +249,6 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
                   fillColor: Colors.transparent,
                   isDense: true,
                 ),
-                menuMaxHeight: 350,
                 items: _specialties.map((specialty) {
                   return DropdownMenuItem<String>(
                     value: specialty,
@@ -308,17 +256,11 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
                   );
                 }).toList(),
                 onChanged: (String? value) {
-                  final newSpecialty = value ?? '';
                   setState(() {
-                    _selectedSpecialty = newSpecialty;
+                    _selectedSpecialty = value ?? '';
                     // Reset doctor selection when specialty changes
                     _selectedDoctorId = null;
                   });
-                  
-                  // Load doctors immediately when specialty changes
-                  if (newSpecialty.isNotEmpty) {
-                    _loadDoctorsBySpecialty(newSpecialty);
-                  }
                 },
                 validator: (value) {
                   if (value == null || value.isEmpty) {
@@ -341,23 +283,20 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
                 ),
               ),
               const SizedBox(height: 12),
-              
-              // Show doctors from local state immediately
-              _isLoadingDoctors
-                  ? const Center(
-                      child: Padding(
-                        padding: EdgeInsets.symmetric(vertical: 16.0),
-                        child: SizedBox(
-                          height: 24,
-                          width: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.0,
-                          ),
-                        ),
-                      ),
-                    )
-                  : _availableDoctors.isEmpty
-                      ? Center(
+              Consumer(
+                builder: (context, ref, child) {
+                  final doctorsAsyncValue = ref.watch(
+                    specialtyDoctorsProvider(_selectedSpecialty)
+                  );
+                  
+                  return doctorsAsyncValue.when(
+                    loading: () => const Center(child: CircularProgressIndicator()),
+                    error: (error, stackTrace) => Center(
+                      child: Text('Error loading doctors: $error'),
+                    ),
+                    data: (doctors) {
+                      if (doctors.isEmpty) {
+                        return Center(
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 16.0),
                             child: Text(
@@ -367,135 +306,97 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
                               ),
                             ),
                           ),
-                        )
-                      : Theme(
-                          // Add a theme override to reduce dropdown button height
-                          data: Theme.of(context).copyWith(
-                            inputDecorationTheme: InputDecorationTheme(
-                              isDense: true,
-                              contentPadding: EdgeInsets.zero,
+                        );
+                      }
+                      
+                      return Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      color: AppColors.surfaceLight,
+                    ),
+                    child: DropdownButtonFormField<String>(
+                      value: _selectedDoctorId,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        hintText: 'Select a doctor',
+                        filled: true,
+                        fillColor: Colors.transparent,
+                        isDense: true,
+                      ),
+                      menuMaxHeight: 300,
+                      itemHeight: 60.0,
+                      items: doctors.map((doctor) {
+                        return DropdownMenuItem<String>(
+                          value: doctor.id,
+                          child: Container(
+                            constraints: const BoxConstraints(
+                              minHeight: 60,
                             ),
-                          ),
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              return SizedBox(
-                                height: 42, // Further reduced fixed height
-                                child: FittedBox(
-                                  fit: BoxFit.fitWidth,
-                                  child: Container(
-                                    width: constraints.maxWidth,
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(12),
-                                      color: AppColors.surfaceLight,
-                                    ),
-                                    child: ButtonTheme(
-                                      // Use ButtonTheme to control height
-                                      alignedDropdown: true,
-                                      padding: EdgeInsets.zero,
-                                      height: 40,
-                                      child: DropdownButtonFormField<String>(
-                                        value: _selectedDoctorId,
-                                        icon: Icon(Icons.arrow_drop_down, size: 20),
-                                        decoration: InputDecoration(
-                                          border: OutlineInputBorder(
-                                            borderRadius: BorderRadius.circular(12),
-                                            borderSide: BorderSide.none,
-                                          ),
-                                          contentPadding: const EdgeInsets.only(
-                                            left: 12,
-                                            right: 8,
-                                            top: 0, 
-                                            bottom: 0
-                                          ),
-                                          hintText: 'Select a doctor',
-                                          hintStyle: TextStyle(fontSize: 12),
-                                          filled: true,
-                                          fillColor: Colors.transparent,
-                                          isDense: true,
-                                        ),
-                                        dropdownColor: AppColors.surfaceLight,
-                                        menuMaxHeight: MediaQuery.of(context).size.height * 0.4,
-                                        itemHeight: 40, // Further reduced item height
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: AppColors.textPrimary,
-                                        ),
-                                        items: _availableDoctors.map((doctor) {
-                                          return DropdownMenuItem<String>(
-                                            value: doctor.id,
-                                            child: ConstrainedBox(
-                                              constraints: const BoxConstraints(
-                                                maxHeight: 30, // Further reduced height
-                                              ),
-                                              child: Row(
-                                                mainAxisAlignment: MainAxisAlignment.start,
-                                                crossAxisAlignment: CrossAxisAlignment.center,
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  // Skip the avatar to save space
-                                                  Expanded(
-                                                    child: Padding(
-                                                      padding: const EdgeInsets.symmetric(vertical: 4),
-                                                      child: Column(
-                                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                                        mainAxisAlignment: MainAxisAlignment.center,
-                                                        mainAxisSize: MainAxisSize.min,
-                                                        children: [
-                                                          Text(
-                                                            'Dr. ${doctor.name}',
-                                                            style: TextStyle(
-                                                              fontWeight: FontWeight.w500,
-                                                              fontSize: 11, // Further reduced font size
-                                                              color: AppColors.textPrimary,
-                                                            ),
-                                                            overflow: TextOverflow.ellipsis,
-                                                            maxLines: 1,
-                                                          ),
-                                                          Text(
-                                                            doctor.specialty,
-                                                            style: TextStyle(
-                                                              color: AppColors.textSecondary,
-                                                              fontSize: 9, // Further reduced font size
-                                                            ),
-                                                            overflow: TextOverflow.ellipsis,
-                                                            maxLines: 1,
-                                                          ),
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          );
-                                        }).toList(),
-                                        onChanged: (String? value) {
-                                          setState(() {
-                                            _selectedDoctorId = value;
-                                            // Reset slot selection when doctor changes
-                                            _selectedSlotId = null;
-                                          });
-                                          
-                                          // Update slots when doctor changes
-                                          if (value != null) {
-                                            _updateSlotsAsync();
-                                          }
-                                        },
-                                        validator: (value) {
-                                          if (value == null || value.isEmpty) {
-                                            return 'Please select a doctor';
-                                          }
-                                          return null;
-                                        },
-                                      ),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                  radius: 16,
+                                  backgroundColor: Color.fromRGBO(
+                                    AppColors.primary.red.toInt(),
+                                    AppColors.primary.green.toInt(), 
+                                    AppColors.primary.blue.toInt(),
+                                    0.1),
+                                child: Text(
+                                  doctor.name.isNotEmpty ? doctor.name[0] : 'D',
+                                  style: const TextStyle(
+                                    color: AppColors.primary,
+                                    fontWeight: FontWeight.bold,
+                                      fontSize: 12,
                                     ),
                                   ),
                                 ),
-                              );
-                            },
+                                const SizedBox(width: 10),
+                              Expanded(
+                                  child: Text(
+                                      'Dr. ${doctor.name}',
+                                      style: AppTypography.bodyMedium.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                      fontSize: 14,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                           ),
-                        ),
-              const SizedBox(height: 24),
+                        );
+                      }).toList(),
+                      onChanged: (String? value) {
+                        setState(() {
+                          _selectedDoctorId = value;
+                          _selectedSlotId = null; // Reset selected slot when doctor changes
+                        });
+                        // Immediately load available slots when a doctor is selected
+                        _onDoctorOrDateChanged();
+                      },
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please select a doctor';
+                        }
+                        return null;
+                      },
+                      dropdownColor: AppColors.surfaceLight,
+                      isExpanded: true,
+                    ),
+                      );
+                    },
+                  );
+                },
+                  ),
+                  const SizedBox(height: 24),
             ],
                   
             // Date and Time Selection - only shown after doctor is selected
@@ -594,100 +495,100 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
               const SizedBox(height: 24),
             ],
                   
-            // Reason for Visit
-            Text(
-              'Reason for Visit',
-              style: AppTypography.titleMedium.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              decoration: InputDecoration(
-                hintText: 'Briefly describe your symptoms or reason',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-                fillColor: AppColors.surfaceLight,
-                contentPadding: const EdgeInsets.all(16),
-              ),
-              maxLines: 3,
-              onChanged: (value) {
-                setState(() {
-                  _reasonForVisit = value;
-                });
-              },
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Please enter a reason for your visit';
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 24),
-            
-            // Additional Notes
-            Text(
-              'Additional Notes (Optional)',
-              style: AppTypography.titleMedium.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              decoration: InputDecoration(
-                hintText: 'Any additional information you want to provide',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-                fillColor: AppColors.surfaceLight,
-                contentPadding: const EdgeInsets.all(16),
-              ),
-              maxLines: 2,
-              onChanged: (value) {
-                setState(() {
-                  _additionalNotes = value;
-                });
-              },
-            ),
-            const SizedBox(height: 32),
-            
-            // Book Appointment Button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _bookAppointment,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                  // Reason for Visit
+                  Text(
+                    'Reason for Visit',
+                    style: AppTypography.titleMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                  elevation: 0,
-                ),
-                child: _isLoading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          color: Colors.white,
-                          strokeWidth: 2,
-                        ),
-                      )
-                    : Text(
-                        'Book Appointment',
-                        style: AppTypography.titleMedium.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    decoration: InputDecoration(
+                      hintText: 'Briefly describe your symptoms or reason',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
                       ),
-              ),
-            ),
+                      filled: true,
+                      fillColor: AppColors.surfaceLight,
+                      contentPadding: const EdgeInsets.all(16),
+                    ),
+                    maxLines: 3,
+                    onChanged: (value) {
+                      setState(() {
+                        _reasonForVisit = value;
+                      });
+                    },
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter a reason for your visit';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  
+                  // Additional Notes
+                  Text(
+                    'Additional Notes (Optional)',
+                    style: AppTypography.titleMedium.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    decoration: InputDecoration(
+                      hintText: 'Any additional information you want to provide',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: AppColors.surfaceLight,
+                      contentPadding: const EdgeInsets.all(16),
+                    ),
+                    maxLines: 2,
+                    onChanged: (value) {
+                      setState(() {
+                        _additionalNotes = value;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 32),
+                  
+                  // Book Appointment Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _bookAppointment,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : Text(
+                              'Book Appointment',
+                              style: AppTypography.titleMedium.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                    ),
+                  ),
                   const SizedBox(height: 20),
                 ],
               ),
@@ -775,7 +676,8 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
       setState(() {
         _selectedDate = picked;
       });
-      _updateSlotsAsync();
+      // Load slots for the new date immediately
+      _onDoctorOrDateChanged();
     }
   }
 
@@ -793,186 +695,154 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
       );
     }
 
-    // If we already have slots loaded, show them immediately to reduce perceived loading time
-    if (_availableSlots.isNotEmpty) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: 8,
-            runSpacing: 12,
-            children: _availableSlots.map((slot) {
-              final isSelected = _selectedSlotId == slot.id;
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _selectedSlotId = slot.id;
-                    debugPrint("Selected slot ID: ${slot.id}, time: ${slot.timeSlot}");
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: isSelected ? AppColors.primary : AppColors.surfaceLight,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: isSelected ? AppColors.primary : AppColors.surfaceDark,
-                      width: isSelected ? 2 : 1,
-                    ),
-                  ),
-                  child: Text(
-                    slot.timeSlot,
-                    style: AppTypography.bodyMedium.copyWith(
-                      color: isSelected ? Colors.white : AppColors.textPrimary,
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
+    // Show loading indicator if slots are loading
+    if (_isSlotsLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 20.0),
+        child: Center(
+          child: Column(
+            children: [
+              SizedBox(
+                height: 24,
+                width: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              SizedBox(height: 12),
+              Text("Loading available slots..."),
+            ],
           ),
-        ],
-      );
-    }
-
-    // Make sure to update _slotsAsync if it's null
-    if (_slotsAsync == null) {
-      _updateSlotsAsync();
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 20.0),
-          child: CircularProgressIndicator(),
         ),
       );
     }
 
-    return FutureBuilder<List<AppointmentSlotModel>>(
-      future: _slotsAsync,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 20.0),
-              child: CircularProgressIndicator(),
-            ),
-          );
-        } else if (snapshot.hasError) {
-          // Handle error - either show error message or demo slots
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Text(
-                  'Error loading time slots: ${snapshot.error}',
-                  style: TextStyle(color: Colors.red[700], fontWeight: FontWeight.w500),
-                ),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    // Set demo slots for display
-                    _availableSlots = _createDefaultTimeSlots();
-                    _selectedSlotId = null;
-                  });
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('View Demo Time Slots'),
-              ),
-            ],
-          );
-        } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16.0),
-            child: Center(
-              child: Column(
-                children: [
-                  Icon(Icons.event_busy, size: 40, color: Colors.grey[500]),
-                  const SizedBox(height: 8),
-                  Text(
-                    'No time slots available for this date. Please try another date.',
-                    style: TextStyle(fontWeight: FontWeight.w500, color: Colors.grey[700]),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        _availableSlots = snapshot.data!;
-        debugPrint("Available slots count: ${_availableSlots.length}");
-
-        return Column(
+    // Show error if there was a problem loading slots
+    if (_slotsErrorMessage != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12.0),
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Wrap(
-              spacing: 8,
-              runSpacing: 12,
-              children: _availableSlots.map((slot) {
-                final isSelected = _selectedSlotId == slot.id;
-                return GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _selectedSlotId = slot.id;
-                      debugPrint("Selected slot ID: ${slot.id}, time: ${slot.timeSlot}");
-                    });
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: isSelected ? AppColors.primary : AppColors.surfaceLight,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: isSelected ? AppColors.primary : AppColors.surfaceDark,
-                        width: isSelected ? 2 : 1,
-                      ),
-                    ),
-                    child: Text(
-                      slot.timeSlot,
-                      style: AppTypography.bodyMedium.copyWith(
-                        color: isSelected ? Colors.white : AppColors.textPrimary,
-                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
+            Text(
+              'Error: $_slotsErrorMessage',
+              style: TextStyle(color: Colors.red[700], fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: _onDoctorOrDateChanged,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Retry'),
             ),
           ],
-        );
-      },
-    );
-  }
-
-  // Helper method to create demo time slots
-  List<AppointmentSlotModel> _createDefaultTimeSlots() {
-    final DateTime today = _selectedDate;
-    
-    List<AppointmentSlotModel> demoSlots = [];
-    for (int i = 0; i < 8; i++) {
-      final hour = 9 + (i ~/ 2);
-      final minute = (i % 2) * 30;
-      
-      // Format hour with AM/PM
-      final String hourStr = hour <= 12 ? '$hour' : '${hour - 12}';
-      final String amPm = hour < 12 ? 'AM' : 'PM';
-      final timeSlot = '$hourStr:${minute.toString().padLeft(2, '0')} $amPm';
-      
-      demoSlots.add(AppointmentSlotModel(
-        id: 'demo-slot-$i',
-        doctorId: _selectedDoctorId!,
-        date: today,
-        timeSlot: timeSlot,
-        isBooked: false,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      ));
+        ),
+      );
     }
-    return demoSlots;
+
+    // Show message if no slots are available
+    if (_availableSlots.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16.0),
+        child: Center(
+          child: Column(
+            children: [
+              Icon(Icons.event_busy, size: 40, color: Colors.grey[500]),
+              const SizedBox(height: 8),
+              Text(
+                'No time slots available for this date.',
+                style: TextStyle(fontWeight: FontWeight.w500, color: Colors.grey[700]),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Please try selecting a different date.',
+                style: TextStyle(color: Colors.grey[600]),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: () => _selectDate(context),
+                icon: const Icon(Icons.calendar_today, size: 16),
+                label: const Text('Select Another Date'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Show available slots
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Show date and count info
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12.0),
+          child: Row(
+            children: [
+              Icon(Icons.event_available, size: 16, color: Colors.green[700]),
+              const SizedBox(width: 8),
+              Text(
+                '${_availableSlots.length} available slots on ${DateFormat('EEE, MMM d').format(_selectedDate)}',
+                style: TextStyle(
+                  color: Colors.green[700],
+                  fontWeight: FontWeight.w500,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // Show time slots in a grid
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            childAspectRatio: 2.5,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+          ),
+          itemCount: _availableSlots.length,
+          itemBuilder: (context, index) {
+            final slot = _availableSlots[index];
+            final isSelected = _selectedSlotId == slot.id;
+            
+            return GestureDetector(
+              onTap: () {
+                setState(() {
+                  _selectedSlotId = slot.id;
+                  debugPrint("Selected slot ID: ${slot.id}, time: ${slot.timeSlot}");
+                });
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isSelected ? AppColors.primary : AppColors.surfaceLight,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isSelected ? AppColors.primary : AppColors.surfaceDark,
+                    width: isSelected ? 2 : 1,
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  slot.timeSlot,
+                  style: TextStyle(
+                    color: isSelected ? Colors.white : AppColors.textPrimary,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
   }
 
   Future<void> _bookAppointment() async {
@@ -1021,12 +891,12 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
       
       if (currentUser == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('You need to be logged in to book an appointment'))
-          );
-          setState(() {
-            _isLoading = false;
-          });
+        );
+        setState(() {
+          _isLoading = false;
+        });
         }
         return;
       }

@@ -8,6 +8,8 @@ import 'package:medi_connect/core/services/auth_service.dart';
 import 'package:medi_connect/presentation/widgets/gradient_button.dart';
 import 'package:medi_connect/presentation/widgets/custom_text_field.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 
 class DoctorProfilePage extends ConsumerStatefulWidget {
   const DoctorProfilePage({super.key});
@@ -18,6 +20,11 @@ class DoctorProfilePage extends ConsumerStatefulWidget {
 
 class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
   final _formKey = GlobalKey<FormState>();
+  
+  // Profile Image Variables
+  File? _profileImage;
+  bool _isProfileImageChanged = false;
+  String? _selectedProfileImageUrl;
   
   // Professional Information
   final _specialtyController = TextEditingController();
@@ -417,7 +424,8 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
                   icon: Icons.photo_library,
                   label: 'Gallery',
                   onTap: () {
-                    // TODO: Implement gallery picker
+                    // Implement gallery picker
+                    _pickImageFromGallery();
                     Navigator.pop(context);
                   },
                 ),
@@ -425,7 +433,8 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
                   icon: Icons.camera_alt,
                   label: 'Camera',
                   onTap: () {
-                    // TODO: Implement camera picker
+                    // Implement camera picker
+                    _pickImageFromCamera();
                     Navigator.pop(context);
                   },
                 ),
@@ -434,7 +443,8 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
                   label: 'Remove',
                   color: Colors.red.shade300,
                   onTap: () {
-                    // TODO: Implement photo removal
+                    // Implement photo removal
+                    _removeProfilePhoto();
                     Navigator.pop(context);
                   },
                 ),
@@ -708,6 +718,96 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // Add these new methods to implement the image functionality:
+  
+  Future<void> _pickImageFromGallery() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
+      );
+      
+      if (image != null) {
+        setState(() {
+          _profileImage = File(image.path);
+          _isProfileImageChanged = true;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Profile photo selected from gallery'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error picking image from gallery: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error selecting image: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+  
+  Future<void> _pickImageFromCamera() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? photo = await picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
+        preferredCameraDevice: CameraDevice.front,
+      );
+      
+      if (photo != null) {
+        setState(() {
+          _profileImage = File(photo.path);
+          _isProfileImageChanged = true;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Profile photo captured from camera'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error taking photo: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error capturing photo: $e'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+  
+  void _removeProfilePhoto() {
+    setState(() {
+      _profileImage = null;
+      _isProfileImageChanged = true;
+      _selectedProfileImageUrl = null;
+    });
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Profile photo removed'),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }

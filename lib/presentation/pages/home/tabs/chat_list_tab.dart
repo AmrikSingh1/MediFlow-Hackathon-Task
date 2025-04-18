@@ -6,6 +6,10 @@ import 'package:medi_connect/core/constants/app_typography.dart';
 import 'package:medi_connect/core/models/chat_model.dart';
 import 'package:medi_connect/core/services/auth_service.dart';
 import 'package:medi_connect/core/services/firebase_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:medi_connect/core/models/user_model.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart' as provider_pkg;
 
 // Providers
 final firebaseServiceProvider = Provider<FirebaseService>((ref) => FirebaseService());
@@ -314,6 +318,17 @@ class _ChatListTabState extends ConsumerState<ChatListTab> with AutomaticKeepAli
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      // Save conversation button 
+                      IconButton(
+                        icon: const Icon(Icons.bookmark_border),
+                        iconSize: 20,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () => _saveConversation(chat.id),
+                        tooltip: 'Save to messages tab',
+                        color: AppColors.textSecondary,
+                      ),
+                      const SizedBox(width: 8),
                       if (hasUnread)
                         Container(
                           margin: const EdgeInsets.only(left: 8),
@@ -606,13 +621,221 @@ class _ChatListTabState extends ConsumerState<ChatListTab> with AutomaticKeepAli
     );
   }
 
-  void _showDoctorSelectionDialog() {
+  Future<void> _showDoctorSelectionDialog() async {
     showDialog(
       context: context,
-      builder: (context) => const AlertDialog(
-        title: Text('Coming Soon'),
-        content: Text('Doctor selection and chat creation is coming soon!'),
-      ),
+      builder: (context) {
+        return AlertDialog(
+          title: Text(
+            'Select a Doctor',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: MediaQuery.of(context).size.height * 0.5,
+            child: FutureBuilder<List<UserModel>>(
+              future: FirebaseService().getDoctors(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return Center(
+                    child: CircularProgressIndicator(),
+                  );
+                } else if (snapshot.hasError) {
+                  return Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.error_outline, size: 48, color: Colors.red),
+                        SizedBox(height: 16),
+                        Text(
+                          'Failed to load doctors',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Please try again later',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.person_off, size: 48, color: Colors.grey),
+                        SizedBox(height: 16),
+                        Text(
+                          'No doctors available',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                final doctors = snapshot.data!;
+                return ListView.builder(
+                  itemCount: doctors.length,
+                  itemBuilder: (context, index) {
+                    final doctor = doctors[index];
+                    final specialty = doctor.doctorInfo?['specialty'] ?? 'General Physician';
+                    
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundImage: doctor.profileImageUrl != null
+                            ? NetworkImage(doctor.profileImageUrl!)
+                            : null,
+                        child: doctor.profileImageUrl == null
+                            ? Icon(Icons.person)
+                            : null,
+                      ),
+                      title: Text(doctor.name),
+                      subtitle: Text(specialty),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _createNewChat(doctor);
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: Text('Cancel'),
+            ),
+          ],
+        );
+      },
     );
+  }
+  
+  Future<void> _createNewChat(UserModel doctor) async {
+    final firebaseService = ref.read(firebaseServiceProvider);
+    final authService = ref.read(authServiceProvider);
+    final user = await authService.getCurrentUser();
+    
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You need to be logged in to create a chat')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+    
+    try {
+      // Create a simple chat model with flattened participantDetails
+      final chatModel = ChatModel(
+        id: '', // Will be set by createChat
+        participants: [user.uid, doctor.id],
+        lastMessage: 'Chat started',
+        lastMessageTime: Timestamp.now(),
+        unreadCount: 0,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+        participantDetails: {
+          'name': doctor.name,
+          'specialty': doctor.medicalInfo?['specialty'] ?? 'Doctor',
+          'role': 'doctor',
+          'isOnline': false,
+        },
+      );
+      
+      final chatId = await firebaseService.createChat(chatModel);
+      
+      setState(() {
+        _isLoading = false;
+      });
+      
+      if (chatId.isNotEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Chat created successfully')),
+        );
+        
+        Navigator.pushNamed(
+          context,
+          '${Routes.chat.split('/:')[0]}/$chatId',
+          arguments: {
+            'chatId': chatId,
+            'recipientName': doctor.name,
+            'recipientImageUrl': doctor.profileImageUrl,
+            'isDoctor': false,
+          },
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to create chat: ${e.toString()}')),
+        );
+      }
+    }
+  }
+
+  // Save conversation to messages tab
+  Future<void> _saveConversation(String chatId) async {
+    try {
+      final firebaseService = ref.read(firebaseServiceProvider);
+      final authService = ref.read(authServiceProvider);
+      final user = await authService.getCurrentUser();
+      
+      if (user == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You need to be logged in to save conversations')),
+        );
+        return;
+      }
+      
+      final success = await firebaseService.saveChatConversation(user.uid, chatId);
+      
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Conversation saved to messages tab'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to save conversation'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error saving conversation: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: ${e.toString()}'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 } 

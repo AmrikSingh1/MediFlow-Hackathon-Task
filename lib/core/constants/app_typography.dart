@@ -204,4 +204,17 @@ class AppTypography {
     
     return style;
   }
+  
+  // Additional custom typography styles
+  static TextStyle get cardTitle => titleMedium.copyWith(
+    fontWeight: FontWeight.w700,
+  );
+  
+  static TextStyle get buttonText => labelLarge.copyWith(
+    fontWeight: FontWeight.w600,
+  );
+  
+  static TextStyle get captionAlt => bodySmall.copyWith(
+    color: Colors.grey[600],
+  );
 } 

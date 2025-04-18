@@ -10,8 +10,11 @@ import 'package:medi_connect/presentation/pages/patient/book_appointment_page.da
 import 'package:medi_connect/presentation/pages/doctor/doctor_dashboard_page.dart';
 import 'package:medi_connect/presentation/pages/doctor/doctor_profile_page.dart';
 import 'package:medi_connect/presentation/pages/doctor/patient_detail_page.dart';
+import 'package:medi_connect/presentation/pages/patient/find_doctor_page.dart';
 import 'package:medi_connect/presentation/pages/chat/chat_page.dart';
 import 'package:medi_connect/core/widgets/health_icon_showcase.dart';
+import 'package:medi_connect/presentation/pages/appointment/appointment_details_page.dart';
+import 'package:medi_connect/presentation/pages/documents/medical_documents_page.dart';
 
 // Route names as constants
 class Routes {
@@ -26,9 +29,12 @@ class Routes {
   static const String doctorDashboard = '/doctor/dashboard';
   static const String doctorProfile = '/doctor/profile';
   static const String patientDetail = '/doctor/patient/:id';
+  static const String findDoctor = '/patient/find-doctor';
   static const String chat = '/chat/:id';
   static const String completeProfile = '/complete-profile';
   static const String healthIcons = '/health-icons';
+  static const String appointmentDetails = '/appointment/:id';
+  static const String medicalDocuments = '/documents';
 }
 
 // GoRouter could be used for more complex routing, but for simplicity
@@ -102,6 +108,18 @@ class AppRouter {
           settings: settings,
         );
         
+      case Routes.findDoctor:
+        return MaterialPageRoute(
+          builder: (_) => const FindDoctorPage(),
+          settings: settings,
+        );
+      
+      case Routes.medicalDocuments:
+        return MaterialPageRoute(
+          builder: (_) => const MedicalDocumentsPage(),
+          settings: settings,
+        );
+      
       case Routes.healthIcons:
         return MaterialPageRoute(
           builder: (_) => const HealthIconShowcase(),
@@ -122,6 +140,14 @@ class AppRouter {
           final chatId = settings.name?.split('/').last;
           return MaterialPageRoute(
             builder: (_) => ChatPage(chatId: chatId ?? ''),
+            settings: settings,
+          );
+        }
+        
+        if (settings.name?.startsWith('${Routes.appointmentDetails.split('/:')[0]}/') ?? false) {
+          final appointmentId = settings.name?.split('/').last;
+          return MaterialPageRoute(
+            builder: (_) => AppointmentDetailsPage(appointmentId: appointmentId ?? ''),
             settings: settings,
           );
         }

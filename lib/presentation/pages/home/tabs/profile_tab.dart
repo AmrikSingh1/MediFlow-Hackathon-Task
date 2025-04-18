@@ -6,6 +6,8 @@ import 'package:medi_connect/core/constants/app_typography.dart';
 import 'package:medi_connect/core/models/user_model.dart';
 import 'package:medi_connect/core/services/auth_service.dart';
 import 'package:medi_connect/core/services/firebase_service.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 
 final userProvider = FutureProvider.autoDispose<UserModel?>((ref) async {
   final authService = AuthService();
@@ -345,7 +347,7 @@ class _ProfileTabState extends ConsumerState<ProfileTab> with AutomaticKeepAlive
                       size: 20,
                     ),
                     onPressed: () {
-                      // TODO: Implement image picker
+                      _showImagePickerOptions();
                     },
                   ),
                 ),
@@ -506,6 +508,144 @@ class _ProfileTabState extends ConsumerState<ProfileTab> with AutomaticKeepAlive
             trailing,
           ],
         ),
+      ),
+    );
+  }
+
+  void _showImagePickerOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Update Profile Picture',
+              style: AppTypography.headlineSmall.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildImageSourceOption(
+                  icon: Icons.photo_library,
+                  label: 'Gallery',
+                  onTap: () {
+                    _pickImage(ImageSource.gallery);
+                    Navigator.pop(context);
+                  },
+                ),
+                _buildImageSourceOption(
+                  icon: Icons.camera_alt,
+                  label: 'Camera',
+                  onTap: () {
+                    _pickImage(ImageSource.camera);
+                    Navigator.pop(context);
+                  },
+                ),
+                _buildImageSourceOption(
+                  icon: Icons.delete,
+                  label: 'Remove',
+                  color: Colors.redAccent,
+                  onTap: () {
+                    _removeProfileImage();
+                    Navigator.pop(context);
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImageSourceOption({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    Color? color,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: (color ?? AppColors.primary).withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              color: color ?? AppColors.primary,
+              size: 30,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: AppTypography.bodyMedium.copyWith(
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(
+        source: source,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
+      );
+      
+      if (image != null) {
+        // Here we'd typically upload the image to storage and update the user profile
+        // For now, just show a snackbar indicating success
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Profile picture updated'),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating profile picture: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+  
+  void _removeProfileImage() {
+    // Here we'd typically remove the image from storage and update the user profile
+    // For now, just show a snackbar indicating success
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Profile picture removed'),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }

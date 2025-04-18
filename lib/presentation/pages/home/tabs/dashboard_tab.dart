@@ -43,12 +43,30 @@ final recentDoctorsProvider = FutureProvider.autoDispose<List<DoctorModel>>((ref
   if (user == null) return [];
   
   try {
-    // In a real app, this would fetch recently consulted doctors
-    // For now, just get a few doctors as demo data
-    final doctors = await firebaseService.getDoctorsFromCollection();
-    return doctors.take(2).toList();
+    // Get past appointments of the user to find doctors they've consulted
+    final pastAppointments = await firebaseService.getPastAppointments(user.uid, false);
+    if (pastAppointments.isEmpty) return [];
+    
+    // Extract unique doctor IDs from past appointments
+    final doctorIds = pastAppointments.map((apt) => apt.doctorId).toSet().toList();
+    
+    // Fetch doctor details for each unique doctor ID
+    final consultedDoctors = <DoctorModel>[];
+    
+    for (final doctorId in doctorIds) {
+      try {
+        final doctor = await firebaseService.getDoctorById(doctorId);
+        if (doctor != null) {
+          consultedDoctors.add(doctor);
+        }
+      } catch (e) {
+        debugPrint('Error loading doctor $doctorId: $e');
+      }
+    }
+    
+    return consultedDoctors;
   } catch (e) {
-    debugPrint('Error loading recent doctors: $e');
+    debugPrint('Error loading consulted doctors: $e');
     return [];
   }
 });
@@ -776,14 +794,14 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
           child: Text(
-            'Doctors you have consulted',
+            'Your past consultations',
             style: AppTypography.headlineSmall.copyWith(
               fontWeight: FontWeight.bold,
             ),
           ),
         ),
         SizedBox(
-          height: 90,
+          height: 110,
           child: Consumer(
             builder: (context, ref, child) {
               final doctorsAsync = ref.watch(recentDoctorsProvider);
@@ -862,6 +880,30 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
                                       ),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    // Rating display with stars
+                                    Row(
+                                      children: [
+                                        ...List.generate(5, (index) {
+                                          final isHalf = index + 0.5 == doctor.rating;
+                                          final isFilled = index < doctor.rating;
+                                          
+                                          return Icon(
+                                            isHalf ? Icons.star_half : (isFilled ? Icons.star : Icons.star_border),
+                                            color: isFilled || isHalf ? Colors.amber : Colors.grey.shade300,
+                                            size: 14,
+                                          );
+                                        }),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '${doctor.rating.toStringAsFixed(1)} (${doctor.ratingCount})',
+                                          style: AppTypography.bodySmall.copyWith(
+                                            color: Colors.grey.shade600,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
