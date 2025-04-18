@@ -247,96 +247,111 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
                         );
                       }
                       
-                      return Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(12),
-                      color: AppColors.surfaceLight,
-                    ),
-                    constraints: const BoxConstraints(minHeight: 60),
-                    child: DropdownButtonFormField<String>(
-                      value: _selectedDoctorId,
-                      decoration: InputDecoration(
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 16,
-                        ),
-                        hintText: 'Select a doctor',
-                        filled: true,
-                        fillColor: Colors.transparent,
-                        isDense: false,
-                      ),
-                      menuMaxHeight: 400,
-                      itemHeight: 75,
-                      items: doctors.map((doctor) {
-                        return DropdownMenuItem<String>(
-                          value: doctor.id,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8.0),
-                            child: Row(
-                              children: [
-                                CircleAvatar(
-                                  radius: 20,
-                                  backgroundColor: Color.fromRGBO(
-                                    AppColors.primary.red.toInt(),
-                                    AppColors.primary.green.toInt(), 
-                                    AppColors.primary.blue.toInt(),
-                                    0.1),
-                                  child: Text(
-                                    doctor.name.isNotEmpty ? doctor.name[0] : 'D',
-                                    style: const TextStyle(
-                                      color: AppColors.primary,
-                                      fontWeight: FontWeight.bold,
+                      return LayoutBuilder(
+                        builder: (context, constraints) {
+                          return Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              color: AppColors.surfaceLight,
+                            ),
+                            constraints: const BoxConstraints(minHeight: 50, maxHeight: 60), // Fixed height constraints
+                            child: DropdownButtonFormField<String>(
+                              value: _selectedDoctorId,
+                              decoration: InputDecoration(
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide.none,
+                                ),
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: constraints.maxWidth < 350 ? 4 : 8, // Responsive padding based on width
+                                ),
+                                hintText: 'Select a doctor',
+                                filled: true,
+                                fillColor: Colors.transparent,
+                                isDense: true,
+                              ),
+                              menuMaxHeight: MediaQuery.of(context).size.height * 0.4, // Responsive menu height
+                              itemHeight: constraints.maxWidth < 350 ? 50 : 60, // Responsive item height
+                              items: doctors.map((doctor) {
+                                return DropdownMenuItem<String>(
+                                  value: doctor.id,
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxHeight: constraints.maxWidth < 350 ? 40 : 50,
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.start,
+                                      crossAxisAlignment: CrossAxisAlignment.center,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        CircleAvatar(
+                                          radius: constraints.maxWidth < 350 ? 14 : 16,
+                                          backgroundColor: Color.fromRGBO(
+                                            AppColors.primary.red.toInt(),
+                                            AppColors.primary.green.toInt(), 
+                                            AppColors.primary.blue.toInt(),
+                                            0.1),
+                                          child: Text(
+                                            doctor.name.isNotEmpty ? doctor.name[0] : 'D',
+                                            style: TextStyle(
+                                              color: AppColors.primary,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: constraints.maxWidth < 350 ? 10 : 12,
+                                            ),
+                                          ),
+                                        ),
+                                        SizedBox(width: constraints.maxWidth < 350 ? 6 : 8),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                'Dr. ${doctor.name}',
+                                                style: AppTypography.bodyMedium.copyWith(
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: constraints.maxWidth < 350 ? 12 : 14,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                                maxLines: 1,
+                                              ),
+                                              Text(
+                                                doctor.specialty,
+                                                style: AppTypography.bodySmall.copyWith(
+                                                  color: AppColors.textSecondary,
+                                                  fontSize: constraints.maxWidth < 350 ? 10 : 12,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                                maxLines: 1,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        'Dr. ${doctor.name}',
-                                        style: AppTypography.bodyMedium.copyWith(
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        doctor.specialty,
-                                        style: AppTypography.bodySmall.copyWith(
-                                          color: AppColors.textSecondary,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
+                                );
+                              }).toList(),
+                              onChanged: (String? value) {
+                                setState(() {
+                                  _selectedDoctorId = value;
+                                      // Reset slot selection when doctor changes
+                                      _selectedSlotId = null;
+                                });
+                              },
+                              validator: (value) {
+                                if (value == null || value.isEmpty) {
+                                  return 'Please select a doctor';
+                                }
+                                return null;
+                              },
+                              dropdownColor: AppColors.surfaceLight,
+                              isExpanded: true,
                             ),
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (String? value) {
-                        setState(() {
-                          _selectedDoctorId = value;
-                              // Reset slot selection when doctor changes
-                              _selectedSlotId = null;
-                        });
-                      },
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please select a doctor';
-                        }
-                        return null;
-                      },
-                      dropdownColor: AppColors.surfaceLight,
-                      isExpanded: true,
-                    ),
+                          );
+                        },
                       );
                     },
                   );
