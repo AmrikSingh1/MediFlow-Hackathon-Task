@@ -56,12 +56,17 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
   String? _selectedSlotId;
   
   bool _isLoading = false;
+  bool _isFetchingDoctors = false;
   
   // List to store available slots
   List<AppointmentSlotModel> _availableSlots = [];
   
   // Future to store the async operation for loading slots
   Future<List<AppointmentSlotModel>>? _slotsAsync;
+
+  // Cache for doctors by specialty to make loading instant
+  Map<String, List<DoctorModel>> _doctorsBySpecialty = {};
+  List<DoctorModel> _currentDoctors = [];
 
   // List of specialties
   final List<String> _specialties = [
@@ -83,6 +88,54 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
     super.initState();
     // Initialize _slotsAsync as needed
     _updateSlotsAsync();
+    // Pre-fetch all doctors and categorize by specialty
+    _prefetchAllDoctors();
+  }
+
+  // Pre-fetch all doctors and categorize them by specialty for instant loading
+  void _prefetchAllDoctors() async {
+    setState(() {
+      _isFetchingDoctors = true;
+    });
+
+    try {
+      // Fetch all doctors once
+      final firebaseService = FirebaseService();
+      final allDoctors = await firebaseService.getDoctorsFromCollection();
+      
+      // Organize doctors by specialty
+      final Map<String, List<DoctorModel>> doctorMap = {};
+      
+      // Initialize with empty lists for all specialties
+      for (final specialty in _specialties) {
+        doctorMap[specialty] = [];
+      }
+      
+      // Categorize doctors by specialty
+      for (final doctor in allDoctors) {
+        final specialty = doctor.specialty;
+        if (doctorMap.containsKey(specialty)) {
+          doctorMap[specialty]!.add(doctor);
+        } else {
+          // For specialties not in our predefined list
+          doctorMap[specialty] = [doctor];
+        }
+      }
+      
+      if (mounted) {
+        setState(() {
+          _doctorsBySpecialty = doctorMap;
+          _isFetchingDoctors = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error pre-fetching doctors: $e");
+      if (mounted) {
+        setState(() {
+          _isFetchingDoctors = false;
+        });
+      }
+    }
   }
 
   // Helper method to update slots async when doctor or date changes
@@ -196,8 +249,16 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
                 onChanged: (String? value) {
                   setState(() {
                     _selectedSpecialty = value ?? '';
+                    
                     // Reset doctor selection when specialty changes
                     _selectedDoctorId = null;
+                    
+                    // Update current doctors from cached doctors by specialty
+                    if (_selectedSpecialty.isNotEmpty && _doctorsBySpecialty.containsKey(_selectedSpecialty)) {
+                      _currentDoctors = _doctorsBySpecialty[_selectedSpecialty] ?? [];
+                    } else {
+                      _currentDoctors = [];
+                    }
                   });
                 },
                 validator: (value) {
@@ -221,143 +282,147 @@ class _BookAppointmentPageState extends ConsumerState<BookAppointmentPage> {
                 ),
               ),
               const SizedBox(height: 12),
-              Consumer(
-                builder: (context, ref, child) {
-                  final doctorsAsyncValue = ref.watch(
-                    specialtyDoctorsProvider(_selectedSpecialty)
-                  );
+              
+              // Use the pre-fetched doctors instead of loading them each time
+              Builder(
+                builder: (context) {
+                  // Show loading indicator only when fetching all doctors initially
+                  if (_isFetchingDoctors) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: CircularProgressIndicator(),
+                      ),
+                    );
+                  }
                   
-                  return doctorsAsyncValue.when(
-                    loading: () => const Center(child: CircularProgressIndicator()),
-                    error: (error, stackTrace) => Center(
-                      child: Text('Error loading doctors: $error'),
-                    ),
-                    data: (doctors) {
-                      if (doctors.isEmpty) {
-                        return Center(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 16.0),
-                            child: Text(
-                              'No doctors available for $_selectedSpecialty',
-                              style: AppTypography.bodyMedium.copyWith(
-                                color: AppColors.textSecondary,
-                              ),
-                            ),
+                  final doctors = _doctorsBySpecialty[_selectedSpecialty] ?? [];
+                  
+                  if (doctors.isEmpty) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16.0),
+                        child: Text(
+                          'No doctors available for $_selectedSpecialty',
+                          style: AppTypography.bodyMedium.copyWith(
+                            color: AppColors.textSecondary,
                           ),
-                        );
-                      }
-                      
-                      return LayoutBuilder(
-                        builder: (context, constraints) {
-                          return Container(
-                            decoration: BoxDecoration(
+                        ),
+                      ),
+                    );
+                  }
+                  
+                  return LayoutBuilder(
+                    builder: (context, constraints) {
+                      return Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          color: AppColors.surfaceLight,
+                        ),
+                        constraints: const BoxConstraints(minHeight: 50, maxHeight: 60),
+                        child: DropdownButtonFormField<String>(
+                          value: _selectedDoctorId,
+                          decoration: InputDecoration(
+                            border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              color: AppColors.surfaceLight,
+                              borderSide: BorderSide.none,
                             ),
-                            constraints: const BoxConstraints(minHeight: 50, maxHeight: 60), // Fixed height constraints
-                            child: DropdownButtonFormField<String>(
-                              value: _selectedDoctorId,
-                              decoration: InputDecoration(
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  borderSide: BorderSide.none,
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: constraints.maxWidth < 350 ? 4 : 8,
+                            ),
+                            hintText: 'Select a doctor',
+                            filled: true,
+                            fillColor: Colors.transparent,
+                            isDense: true,
+                          ),
+                          menuMaxHeight: MediaQuery.of(context).size.height * 0.4,
+                          itemHeight: constraints.maxWidth < 350 ? 50 : 60,
+                          items: doctors.map((doctor) {
+                            return DropdownMenuItem<String>(
+                              value: doctor.id,
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxHeight: constraints.maxWidth < 350 ? 40 : 50,
                                 ),
-                                contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: constraints.maxWidth < 350 ? 4 : 8, // Responsive padding based on width
-                                ),
-                                hintText: 'Select a doctor',
-                                filled: true,
-                                fillColor: Colors.transparent,
-                                isDense: true,
-                              ),
-                              menuMaxHeight: MediaQuery.of(context).size.height * 0.4, // Responsive menu height
-                              itemHeight: constraints.maxWidth < 350 ? 50 : 60, // Responsive item height
-                              items: doctors.map((doctor) {
-                                return DropdownMenuItem<String>(
-                                  value: doctor.id,
-                                  child: ConstrainedBox(
-                                    constraints: BoxConstraints(
-                                      maxHeight: constraints.maxWidth < 350 ? 40 : 50,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CircleAvatar(
+                                      radius: constraints.maxWidth < 350 ? 14 : 16,
+                                      backgroundColor: Color.fromRGBO(
+                                        AppColors.primary.red.toInt(),
+                                        AppColors.primary.green.toInt(), 
+                                        AppColors.primary.blue.toInt(),
+                                        0.1),
+                                      child: Text(
+                                        doctor.name.isNotEmpty ? doctor.name[0] : 'D',
+                                        style: TextStyle(
+                                          color: AppColors.primary,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: constraints.maxWidth < 350 ? 10 : 12,
+                                        ),
+                                      ),
                                     ),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.start,
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        CircleAvatar(
-                                          radius: constraints.maxWidth < 350 ? 14 : 16,
-                                          backgroundColor: Color.fromRGBO(
-                                            AppColors.primary.red.toInt(),
-                                            AppColors.primary.green.toInt(), 
-                                            AppColors.primary.blue.toInt(),
-                                            0.1),
-                                          child: Text(
-                                            doctor.name.isNotEmpty ? doctor.name[0] : 'D',
-                                            style: TextStyle(
-                                              color: AppColors.primary,
-                                              fontWeight: FontWeight.bold,
+                                    SizedBox(width: constraints.maxWidth < 350 ? 6 : 8),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            'Dr. ${doctor.name}',
+                                            style: AppTypography.bodyMedium.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: constraints.maxWidth < 350 ? 12 : 14,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
+                                          ),
+                                          Text(
+                                            doctor.specialty,
+                                            style: AppTypography.bodySmall.copyWith(
+                                              color: AppColors.textSecondary,
                                               fontSize: constraints.maxWidth < 350 ? 10 : 12,
                                             ),
+                                            overflow: TextOverflow.ellipsis,
+                                            maxLines: 1,
                                           ),
-                                        ),
-                                        SizedBox(width: constraints.maxWidth < 350 ? 6 : 8),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Text(
-                                                'Dr. ${doctor.name}',
-                                                style: AppTypography.bodyMedium.copyWith(
-                                                  fontWeight: FontWeight.w600,
-                                                  fontSize: constraints.maxWidth < 350 ? 12 : 14,
-                                                ),
-                                                overflow: TextOverflow.ellipsis,
-                                                maxLines: 1,
-                                              ),
-                                              Text(
-                                                doctor.specialty,
-                                                style: AppTypography.bodySmall.copyWith(
-                                                  color: AppColors.textSecondary,
-                                                  fontSize: constraints.maxWidth < 350 ? 10 : 12,
-                                                ),
-                                                overflow: TextOverflow.ellipsis,
-                                                maxLines: 1,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                );
-                              }).toList(),
-                              onChanged: (String? value) {
-                                setState(() {
-                                  _selectedDoctorId = value;
-                                      // Reset slot selection when doctor changes
-                                      _selectedSlotId = null;
-                                });
-                              },
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Please select a doctor';
-                                }
-                                return null;
-                              },
-                              dropdownColor: AppColors.surfaceLight,
-                              isExpanded: true,
-                            ),
-                          );
-                        },
+                                  ],
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (String? value) {
+                            setState(() {
+                              _selectedDoctorId = value;
+                              // Reset slot selection when doctor changes
+                              _selectedSlotId = null;
+                              // Update slot information
+                              _updateSlotsAsync();
+                            });
+                          },
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Please select a doctor';
+                            }
+                            return null;
+                          },
+                          dropdownColor: AppColors.surfaceLight,
+                          isExpanded: true,
+                        ),
                       );
                     },
                   );
                 },
-                  ),
-                  const SizedBox(height: 24),
+              ),
+              const SizedBox(height: 24),
             ],
                   
             // Date and Time Selection - only shown after doctor is selected
