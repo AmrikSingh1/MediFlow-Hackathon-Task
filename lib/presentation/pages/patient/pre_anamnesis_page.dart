@@ -7,11 +7,16 @@ import 'package:medi_connect/core/services/auth_service.dart';
 import 'package:medi_connect/core/services/firebase_service.dart';
 import 'package:medi_connect/core/models/pre_anamnesis_model.dart';
 import 'package:medi_connect/core/models/user_model.dart';
+import 'package:medi_connect/core/models/report_model.dart';
 import 'package:medi_connect/presentation/widgets/gradient_button.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:math' as math;
+import 'package:share_plus/share_plus.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:path_provider/path_provider.dart';
 
 // Providers for services
 final aiServiceProvider = Provider<AIService>((ref) {
@@ -32,6 +37,7 @@ class ChatMessage {
   final DateTime timestamp;
   final List<String>? options;
   final String? voiceNoteUrl;
+  final bool reportActions;
   
   ChatMessage({
     required this.text,
@@ -39,6 +45,7 @@ class ChatMessage {
     required this.timestamp,
     this.options,
     this.voiceNoteUrl,
+    this.reportActions = false,
   });
 }
 
@@ -69,6 +76,7 @@ class _PreAnamnesisPageState extends ConsumerState<PreAnamnesisPage> {
   };
   
   UserModel? _currentUser;
+  String _lastGeneratedReport = ''; // Store the last generated report for sharing
 
   @override
   void initState() {
@@ -384,36 +392,43 @@ class _PreAnamnesisPageState extends ConsumerState<PreAnamnesisPage> {
               previousConditions: [_patientData['medicalHistory'] ?? ''],
             );
             
+            // Format the report - remove unwanted symbols
+            final formattedReport = _formatReport(report);
+            _lastGeneratedReport = formattedReport; // Store for sharing
+            
             // Save report to Firebase
             if (mounted) {
               try {
-                await _savePreAnamnesisToFirebase(report);
+                await _savePreAnamnesisToFirebase(formattedReport);
               } catch (e) {
                 debugPrint('Error saving pre-anamnesis to Firebase: $e');
                 // Continue even if save fails - we'll still show the report
               }
               
               if (_selectedLanguage == 'hindi') {
-                aiResponse = 'यहां आपकी प्री-एनामनेसिस रिपोर्ट है:\n\n$report\n\nयह जानकारी सुरक्षित रखी गई है और आपकी अपॉइंटमेंट से पहले आपके डॉक्टर के लिए उपलब्ध होगी। क्या आप सत्र को अब पूरा करना चाहेंगे?';
+                aiResponse = 'यहां आपकी प्री-एनामनेसिस रिपोर्ट है:\n\n$formattedReport';
                 setState(() {
                   _isCompleted = true;
                   _isLoading = false;
                 });
-                _addBotMessage(aiResponse, options: ['सत्र पूरा करें', 'एक और प्रश्न पूछें']);
+                _addBotMessage(aiResponse);
+                _addShareOptions();
               } else if (_selectedLanguage == 'hinglish') {
-                aiResponse = 'Yahan aapki pre-anamnesis report hai:\n\n$report\n\nYeh information save kar di gayi hai aur aapke doctor ko aapki appointment se pehle available hogi. Kya aap session ko ab complete karna chahenge?';
+                aiResponse = 'Yahan aapki pre-anamnesis report hai:\n\n$formattedReport';
                 setState(() {
                   _isCompleted = true;
                   _isLoading = false;
                 });
-                _addBotMessage(aiResponse, options: ['Session complete karein', 'Ek aur question poochein']);
+                _addBotMessage(aiResponse);
+                _addShareOptions();
               } else { // english
-                aiResponse = 'Here\'s your pre-anamnesis report:\n\n$report\n\nThis information has been saved and will be available to your doctor before your appointment. Would you like to complete the session now?';
+                aiResponse = 'Here\'s your pre-anamnesis report:\n\n$formattedReport';
                 setState(() {
                   _isCompleted = true;
                   _isLoading = false;
                 });
-                _addBotMessage(aiResponse, options: ['Complete session', 'Ask another question']);
+                _addBotMessage(aiResponse);
+                _addShareOptions();
               }
             }
           } catch (e) {
@@ -424,14 +439,36 @@ class _PreAnamnesisPageState extends ConsumerState<PreAnamnesisPage> {
                 _isLoading = false;
               });
               
+              // Add a more specific error message instead of just "an error"
+              String errorMessage;
+              if (e.toString().contains('timeout')) {
+                errorMessage = _selectedLanguage == 'hindi' 
+                  ? 'रिपोर्ट जनरेट करने का समय समाप्त हो गया। कृपया अपने नेटवर्क कनेक्शन की जांच करें और पुनः प्रयास करें।'
+                  : (_selectedLanguage == 'hinglish' 
+                      ? 'Report generate karne ka time out ho gaya. Please apne network connection check karein aur dobara try karein.'
+                      : 'The report generation timed out. Please check your network connection and try again.');
+              } else if (e.toString().contains('network')) {
+                errorMessage = _selectedLanguage == 'hindi' 
+                  ? 'नेटवर्क त्रुटि के कारण रिपोर्ट जनरेट नहीं की जा सकी। कृपया अपने इंटरनेट कनेक्शन की जांच करें।'
+                  : (_selectedLanguage == 'hinglish' 
+                      ? 'Network error ke karan report generate nahi ho payi. Please apna internet connection check karein.'
+                      : 'The report couldn\'t be generated due to a network error. Please check your internet connection.');
+              } else {
+                errorMessage = _selectedLanguage == 'hindi' 
+                  ? 'रिपोर्ट जनरेट करते समय एक त्रुटि हुई। कृपया बाद में पुनः प्रयास करें।'
+                  : (_selectedLanguage == 'hinglish' 
+                      ? 'Report generate karte samay ek error hui. Please thodi der baad dobara try karein.'
+                      : 'There was an error generating the report. Please try again later.');
+              }
+              
               if (_selectedLanguage == 'hindi') {
-                _addBotMessage('मुझे क्षमा करें, रिपोर्ट तैयार करते समय एक त्रुटि हुई। क्या आप पुन: प्रयास करना चाहेंगे?', 
+                _addBotMessage('मुझे क्षमा करें, $errorMessage', 
                   options: ['पुन: प्रयास करें', 'सत्र पूरा करें']);
               } else if (_selectedLanguage == 'hinglish') {
-                _addBotMessage('Sorry, report generate karte time ek error hui. Kya aap dobara try karna chahenge?', 
+                _addBotMessage('Sorry, $errorMessage', 
                   options: ['Dobara try karein', 'Session complete karein']);
               } else { // english
-                _addBotMessage('I apologize, there was an error generating the report. Would you like to try again?', 
+                _addBotMessage('I apologize, $errorMessage', 
                   options: ['Try again', 'Complete session']);
               }
             }
@@ -549,7 +586,7 @@ class _PreAnamnesisPageState extends ConsumerState<PreAnamnesisPage> {
       debugPrint('Pre-anamnesis saved successfully to Firebase');
     } catch (e) {
       debugPrint('Error saving pre-anamnesis to Firebase: $e');
-      throw e; // Rethrow so the caller knows there was an error
+      rethrow; // Use rethrow instead of throw e
     }
   }
 
@@ -583,7 +620,8 @@ class _PreAnamnesisPageState extends ConsumerState<PreAnamnesisPage> {
       
       try {
         final aiService = ref.read(aiServiceProvider);
-        final audioFile = await aiService.recordAudio();
+        // Call the method but don't store its result if not needed
+        await aiService.recordAudio();
         
         // This would be a real implementation in a production app
         // final transcription = await aiService.transcribeAudio(audioFile);
@@ -630,23 +668,45 @@ class _PreAnamnesisPageState extends ConsumerState<PreAnamnesisPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(title),
+        titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
         content: Text(message),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.surfaceMedium,
-              foregroundColor: AppColors.textPrimary,
-            ),
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(cancelText),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(confirmText),
+        contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+        actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+        actions: <Widget>[
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 48,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.surfaceMedium,
+                    foregroundColor: AppColors.textPrimary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: Text(cancelText),
+                ),
+              ),
+              const SizedBox(height: 16), // Add vertical spacing
+              SizedBox(
+                height: 48,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: Text(confirmText),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -715,14 +775,22 @@ class _PreAnamnesisPageState extends ConsumerState<PreAnamnesisPage> {
                               : 'This chatbot collects information about your symptoms before your appointment. The data is securely stored and shared only with your healthcare provider. This is not a diagnostic tool and does not replace medical advice.')
                     ),
                     actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: Text(
-                          _selectedLanguage == 'hindi' 
-                              ? 'बंद करें' 
-                              : (_selectedLanguage == 'hinglish' 
-                                  ? 'Band karein' 
-                                  : 'Close')
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: Text(
+                            _selectedLanguage == 'hindi' 
+                                ? 'बंद करें' 
+                                : (_selectedLanguage == 'hinglish' 
+                                    ? 'Band karein' 
+                                    : 'Close')
+                          ),
                         ),
                       ),
                     ],
@@ -880,6 +948,59 @@ class _PreAnamnesisPageState extends ConsumerState<PreAnamnesisPage> {
                               color: isUserMessage ? AppColors.textLight : AppColors.textPrimary,
                             ),
                           ),
+                          
+                          // Report action buttons if available
+                          if (message.reportActions == true) ...[
+                            const SizedBox(height: 16),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: _shareReport,
+                                    icon: const Icon(Icons.share, color: Colors.white),
+                                    label: Text(
+                                      _selectedLanguage == 'hindi' 
+                                          ? 'रिपोर्ट साझा करें' 
+                                          : (_selectedLanguage == 'hinglish' 
+                                              ? 'Report share karein' 
+                                              : 'Share Report'),
+                                      style: AppTypography.bodySmall.copyWith(
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppColors.secondary,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: _sendReportToDoctor,
+                                    icon: const Icon(Icons.send, color: Colors.white),
+                                    label: Text(
+                                      _selectedLanguage == 'hindi' 
+                                          ? 'डॉक्टर को भेजें' 
+                                          : (_selectedLanguage == 'hinglish' 
+                                              ? 'Doctor ko bhejein' 
+                                              : 'Send to Doctor'),
+                                      style: AppTypography.bodySmall.copyWith(
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppColors.primary,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                           
                           // Options buttons if available
                           if (message.options != null && message.options!.isNotEmpty) ...[
@@ -1073,23 +1194,45 @@ class _PreAnamnesisPageState extends ConsumerState<PreAnamnesisPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(title),
+        titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
         content: Text(message),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.surfaceMedium,
-              foregroundColor: AppColors.textPrimary,
-            ),
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(cancelText),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(confirmText),
+        contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+        actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+        actions: <Widget>[
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 48,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.surfaceMedium,
+                    foregroundColor: AppColors.textPrimary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: Text(cancelText),
+                ),
+              ),
+              const SizedBox(height: 16), // Add vertical spacing
+              SizedBox(
+                height: 48,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: Text(confirmText),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1098,4 +1241,596 @@ class _PreAnamnesisPageState extends ConsumerState<PreAnamnesisPage> {
     // Return true to allow exit, false to cancel
     return result ?? false;
   }
+
+  // Format the report to remove unwanted symbols
+  String _formatReport(String report) {
+    // Remove markdown symbols like #, *, _, -, =
+    String formatted = report;
+    
+    // Replace section headers (lines with # or ##)
+    formatted = formatted.replaceAllMapped(RegExp(r'#+\s*(.+)'), (match) {
+      return '\n${match.group(1)}\n';
+    });
+    
+    // Remove asterisks used for bold/italics
+    formatted = formatted.replaceAll('**', '').replaceAll('*', '');
+    
+    // Remove underscores used for italics
+    formatted = formatted.replaceAll('__', '').replaceAll('_', '');
+    
+    // Replace bullet points
+    formatted = formatted.replaceAllMapped(RegExp(r'\n\s*[-*]\s+(.+)'), (match) {
+      return '\n• ${match.group(1)}';
+    });
+    
+    // Replace horizontal rules
+    formatted = formatted.replaceAll(RegExp(r'\n-{3,}\n'), '\n\n');
+    formatted = formatted.replaceAll(RegExp(r'\n={3,}\n'), '\n\n');
+    
+    // Replace multiple newlines with double newlines
+    formatted = formatted.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    
+    return formatted;
+  }
+  
+  // Add a message with share options
+  void _addShareOptions() {
+    setState(() {
+      _messages.add(ChatMessage(
+        text: _selectedLanguage == 'hindi' 
+          ? 'आप रिपोर्ट को साझा कर सकते हैं या डॉक्टर को भेज सकते हैं:'
+          : (_selectedLanguage == 'hinglish' 
+              ? 'Aap report ko share kar sakte hain ya doctor ko bhej sakte hain:'
+              : 'You can share the report or send it to your doctor:'),
+        isUser: false,
+        timestamp: DateTime.now(),
+        reportActions: true,
+      ));
+    });
+    
+    // Scroll to bottom after message is added
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+  
+  // Function to share report to external apps
+  Future<void> _shareReport() async {
+    try {
+      // Create a PDF file with the report
+      final pdfFile = await _generatePDF(_lastGeneratedReport);
+      
+      // Share the PDF file
+      await Share.shareXFiles(
+        [XFile(pdfFile.path)],
+        subject: 'My Pre-Anamnesis Report',
+        text: 'Here is my pre-anamnesis report from MediConnect',
+      );
+    } catch (e) {
+      debugPrint('Error sharing report: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to share report: $e')),
+      );
+    }
+  }
+  
+  // Generate a PDF document from the report text
+  Future<File> _generatePDF(String reportText) async {
+    final pdf = pw.Document();
+    
+    // Parse the report to identify and format sections
+    final formattedSections = _parseReportSections(reportText);
+    
+    // Add a page to the PDF
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              // Title
+              pw.Center(
+                child: pw.Text(
+                  'Pre-Anamnesis Report',
+                  style: pw.TextStyle(
+                    fontSize: 24,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 20),
+              
+              // Date and Time
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.end,
+                children: [
+                  pw.Text(
+                    'Date: ${DateTime.now().toLocal().toString().split(' ')[0]}',
+                    style: pw.TextStyle(
+                      fontSize: 12,
+                      fontStyle: pw.FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 30),
+              
+              // Report content with formatted sections
+              ...formattedSections.map((section) {
+                if (section.isHeader) {
+                  return pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.SizedBox(height: 15),
+                      pw.Text(
+                        section.text,
+                        style: pw.TextStyle(
+                          fontSize: 16,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.Divider(thickness: 1),
+                      pw.SizedBox(height: 5),
+                    ],
+                  );
+                } else {
+                  return pw.Padding(
+                    padding: const pw.EdgeInsets.only(bottom: 8),
+                    child: pw.Text(
+                      section.text,
+                      style: pw.TextStyle(fontSize: 12),
+                    ),
+                  );
+                }
+              }).toList(),
+              
+              // Footer
+              pw.Spacer(),
+              pw.Divider(),
+              pw.SizedBox(height: 10),
+              pw.Center(
+                child: pw.Text(
+                  'Generated by MediConnect',
+                  style: pw.TextStyle(
+                    fontSize: 10,
+                    fontStyle: pw.FontStyle.italic,
+                    color: PdfColors.grey,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    
+    // Save the PDF to a file
+    final output = await getTemporaryDirectory();
+    final file = File('${output.path}/pre_anamnesis_report.pdf');
+    await file.writeAsBytes(await pdf.save());
+    
+    return file;
+  }
+  
+  // Parse the report text to identify sections (headers and content)
+  List<ReportSection> _parseReportSections(String reportText) {
+    final sections = <ReportSection>[];
+    final lines = reportText.split('\n');
+    
+    bool inSection = false;
+    String currentHeader = '';
+    String currentContent = '';
+    
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i].trim();
+      
+      if (line.isEmpty) {
+        if (inSection && currentContent.isNotEmpty) {
+          sections.add(ReportSection(text: currentContent, isHeader: false));
+          currentContent = '';
+        }
+        continue;
+      }
+      
+      // Check if this is likely a header
+      bool isHeader = false;
+      
+      // Headers are usually short and often contain these key terms
+      final headerKeywords = [
+        'Patient Information', 'Medical History', 'Symptoms', 
+        'Diagnosis', 'Treatment', 'Allergies', 'Medications',
+        'Chief Complaint', 'Examination', 'Assessment', 'Plan'
+      ];
+      
+      // Check if line contains header keywords or is all uppercase or ends with colon
+      isHeader = headerKeywords.any((keyword) => line.contains(keyword)) || 
+                line == line.toUpperCase() || 
+                line.endsWith(':') ||
+                (line.length < 50 && !line.contains(' and ') && !line.contains(', '));
+      
+      if (isHeader) {
+        // If we were in a section, add the content we've built up
+        if (inSection && currentContent.isNotEmpty) {
+          sections.add(ReportSection(text: currentContent, isHeader: false));
+          currentContent = '';
+        }
+        
+        // Add the header
+        sections.add(ReportSection(text: line, isHeader: true));
+        inSection = true;
+      } else if (inSection) {
+        // Add to current content
+        if (currentContent.isNotEmpty) {
+          currentContent += '\n';
+        }
+        currentContent += line;
+      } else {
+        // Content before any header
+        sections.add(ReportSection(text: line, isHeader: false));
+      }
+    }
+    
+    // Add any remaining content
+    if (currentContent.isNotEmpty) {
+      sections.add(ReportSection(text: currentContent, isHeader: false));
+    }
+    
+    return sections;
+  }
+
+  // Function to send report to doctor
+  Future<void> _sendReportToDoctor() async {
+    // Check if user is logged in
+    if (_currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Please log in to send the report to a doctor')),
+      );
+      return;
+    }
+
+    // Show loading indicator
+    setState(() {
+      _isLoading = true;
+    });
+    
+    try {
+      final firebaseService = ref.read(firebaseServiceProvider);
+      
+      // Instead of getting only doctors from appointments, get all doctors in the system
+      debugPrint("Pre-anamnesis: Fetching all doctors from the system");
+      
+      // Get all doctors from Firebase
+      final allDoctors = await firebaseService.getDoctors();
+      
+      // Hide loading indicator
+      setState(() {
+        _isLoading = false;
+      });
+      
+      debugPrint("Pre-anamnesis: Found ${allDoctors.length} doctors in the system");
+      
+      if (allDoctors.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No doctors found in the system. Please try again later.')),
+        );
+        return;
+      }
+      
+      // Format doctor data for display
+      final doctors = allDoctors.map((doctorData) {
+        return {
+          'id': doctorData.id,
+          'name': doctorData.name,
+          'specialty': doctorData.doctorInfo?['specialty'] ?? 'General Practitioner',
+          'photoUrl': doctorData.profileImageUrl,
+          'experience': doctorData.doctorInfo?['experience'] ?? '0',
+        };
+      }).toList();
+      
+      // Sort doctors by name for easier browsing
+      doctors.sort((a, b) => a['name'].toString().compareTo(b['name'].toString()));
+      
+      // Show enhanced dialog to select a doctor
+      final selectedDoctor = await _showDoctorSelectionDialog(doctors);
+      
+      if (selectedDoctor == null) {
+        return; // User cancelled
+      }
+      
+      // Show loading indicator
+      setState(() {
+        _isLoading = true;
+      });
+      
+      debugPrint("Pre-anamnesis: Sending report to doctor: ${selectedDoctor['name']} (${selectedDoctor['id']})");
+      
+      try {
+        // Generate PDF report
+        await _generatePDF(_lastGeneratedReport); // Don't store the result if not needed
+        
+        // Create a report model
+        final report = ReportModel(
+          id: '', // Will be set by the service
+          patientId: _currentUser!.id,
+          patientName: _currentUser!.name,
+          doctorId: selectedDoctor['id'],
+          appointmentId: null, // Could be set if we want to link to a specific appointment
+          content: _lastGeneratedReport,
+          correctedContent: null,
+          status: ReportStatus.draft, // Explicitly set status to draft
+          isSavedToProfile: false,
+          isSentToPatient: false,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+          pdfUrl: null, // Will be set if we upload the PDF
+        );
+        
+        // Add debug logging to verify report creation
+        debugPrint("Pre-anamnesis: Creating report with status: ${report.status}");
+        debugPrint("Pre-anamnesis: Status string value: ${ReportModel.statusToString(report.status)}");
+        debugPrint("Pre-anamnesis: Report content length: ${report.content.length} characters");
+        debugPrint("Pre-anamnesis: Report doctor ID: ${report.doctorId}");
+        
+        // Extra verification to ensure status is set
+        final reportMap = report.toMap();
+        debugPrint("Pre-anamnesis: Status in map: ${reportMap['status']}");
+        
+        // Send report to Firestore
+        final reportId = await firebaseService.createMedicalReport(report);
+        debugPrint("Pre-anamnesis: Report created with ID: $reportId");
+        
+        // Verify the report was saved correctly
+        final savedReport = await firebaseService.getReportById(reportId);
+        if (savedReport != null) {
+          debugPrint("Pre-anamnesis: Verified report saved with status: ${savedReport.status}");
+          debugPrint("Pre-anamnesis: Verified report status string: ${ReportModel.statusToString(savedReport.status)}");
+          debugPrint("Pre-anamnesis: Verified report saved with doctor ID: ${savedReport.doctorId}");
+        } else {
+          debugPrint("Pre-anamnesis: Warning - Could not verify report was saved");
+        }
+        
+        // Hide loading indicator
+        setState(() {
+          _isLoading = false;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Report sent to Dr. ${selectedDoctor['name']} successfully')),
+        );
+      } catch (innerError) {
+        debugPrint("Pre-anamnesis: Error sending report to doctor: $innerError");
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error sending report: $innerError')),
+        );
+      }
+    } catch (e) {
+      // Hide loading indicator
+      setState(() {
+        _isLoading = false;
+      });
+      
+      debugPrint('Error in _sendReportToDoctor: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send report: $e')),
+      );
+    }
+  }
+  
+  // Enhanced doctor selection dialog with search and filtering
+  Future<Map<String, dynamic>?> _showDoctorSelectionDialog(List<Map<String, dynamic>> doctors) async {
+    // Controller for search field
+    final TextEditingController searchController = TextEditingController();
+    
+    // State for filtered doctors list
+    List<Map<String, dynamic>> filteredDoctors = [...doctors];
+    String selectedSpecialty = 'All Specialties';
+    
+    // Get unique specialties for filtering
+    final Set<String> specialties = {'All Specialties'};
+    for (var doctor in doctors) {
+      if (doctor['specialty'] != null && doctor['specialty'].toString().isNotEmpty) {
+        specialties.add(doctor['specialty'].toString());
+      }
+    }
+    
+    return showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            // Filter function
+            void filterDoctors() {
+              final searchTerm = searchController.text.toLowerCase();
+              setState(() {
+                filteredDoctors = doctors.where((doctor) {
+                  final matchesSearch = doctor['name'].toString().toLowerCase().contains(searchTerm) ||
+                      doctor['specialty'].toString().toLowerCase().contains(searchTerm);
+                  
+                  final matchesSpecialty = selectedSpecialty == 'All Specialties' || 
+                      doctor['specialty'] == selectedSpecialty;
+                  
+                  return matchesSearch && matchesSpecialty;
+                }).toList();
+              });
+            }
+            
+            return AlertDialog(
+              title: Text(
+                _selectedLanguage == 'hindi' 
+                    ? 'डॉक्टर को रिपोर्ट भेजें' 
+                    : (_selectedLanguage == 'hinglish' 
+                        ? 'Doctor ko Report Bhejein' 
+                        : 'Send Report to Doctor')
+              ),
+              content: Container(
+                width: double.maxFinite,
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.7,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Search field
+                    TextField(
+                      controller: searchController,
+                      decoration: InputDecoration(
+                        hintText: _selectedLanguage == 'hindi' 
+                            ? 'डॉक्टर खोजें' 
+                            : (_selectedLanguage == 'hinglish' 
+                                ? 'Doctor khojein' 
+                                : 'Search doctors'),
+                        prefixIcon: Icon(Icons.search),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onChanged: (value) {
+                        filterDoctors();
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    // Specialty filter dropdown
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade300),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          isExpanded: true,
+                          value: selectedSpecialty,
+                          hint: Text(
+                            _selectedLanguage == 'hindi' 
+                                ? 'विशेषज्ञता द्वारा फ़िल्टर करें' 
+                                : (_selectedLanguage == 'hinglish' 
+                                    ? 'Specialty dwara filter karein' 
+                                    : 'Filter by specialty')
+                          ),
+                          items: specialties.map((String specialty) {
+                            return DropdownMenuItem<String>(
+                              value: specialty,
+                              child: Text(specialty),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            setState(() {
+                              selectedSpecialty = value!;
+                              filterDoctors();
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    // Doctors list
+                    Expanded(
+                      child: filteredDoctors.isEmpty
+                          ? Center(
+                              child: Text(
+                                _selectedLanguage == 'hindi' 
+                                    ? 'कोई डॉक्टर नहीं मिला' 
+                                    : (_selectedLanguage == 'hinglish' 
+                                        ? 'Koi doctor nahi mila' 
+                                        : 'No doctors found')
+                              ),
+                            )
+                          : ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: filteredDoctors.length,
+                              itemBuilder: (context, index) {
+                                final doctor = filteredDoctors[index];
+                                return Card(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: ListTile(
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 16, 
+                                      vertical: 8,
+                                    ),
+                                    leading: CircleAvatar(
+                                      radius: 24,
+                                      backgroundImage: doctor['photoUrl'] != null 
+                                          ? NetworkImage(doctor['photoUrl']) 
+                                          : null,
+                                      backgroundColor: doctor['photoUrl'] == null 
+                                          ? Colors.blue.shade100
+                                          : null,
+                                      child: doctor['photoUrl'] == null 
+                                          ? Text(
+                                              doctor['name'].toString().split(' ')
+                                                  .map((e) => e.isNotEmpty ? e[0] : '')
+                                                  .join()
+                                                  .toUpperCase(),
+                                              style: TextStyle(
+                                                color: Colors.blue.shade800,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            )
+                                          : null,
+                                    ),
+                                    title: Text(
+                                      doctor['name'],
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    subtitle: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const SizedBox(height: 4),
+                                        Text(doctor['specialty']),
+                                        if (doctor['experience'] != null && doctor['experience'] != '0')
+                                          Text('${doctor['experience']} years experience'),
+                                      ],
+                                    ),
+                                    onTap: () => Navigator.of(context).pop(doctor),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: Text(
+                    _selectedLanguage == 'hindi' 
+                        ? 'रद्द करें' 
+                        : (_selectedLanguage == 'hinglish' 
+                            ? 'Radd karein' 
+                            : 'Cancel')
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+// Helper class for report sections
+class ReportSection {
+  final String text;
+  final bool isHeader;
+  
+  ReportSection({required this.text, required this.isHeader});
 } 

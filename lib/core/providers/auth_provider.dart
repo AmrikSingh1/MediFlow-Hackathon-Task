@@ -11,8 +11,6 @@ import 'firebase_provider.dart';
 class AuthProvider extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn(
-    // Server client ID from google-services.json
-    serverClientId: '1057695268657-cir3ahv7d3h738ui3gjmn50tmblb8gu8.apps.googleusercontent.com',
     scopes: <String>[
       'email',
       'profile',

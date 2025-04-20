@@ -365,12 +365,54 @@ class _AppointmentDetailsPageState extends ConsumerState<AppointmentDetailsPage>
                             IconButton(
                               icon: const Icon(Icons.message_outlined),
                               color: AppColors.primary,
-                              onPressed: () {
-                                // Navigate to chat screen with this user
-                                Navigator.pushNamed(
-                                  context, 
-                                  '${Routes.chat.split('/:')[0]}/${otherParty.id}',
-                                );
+                              onPressed: () async {
+                                setState(() {
+                                  _isLoading = true;
+                                });
+                                
+                                try {
+                                  // Get Firebase service
+                                  final firebaseService = FirebaseService();
+                                  
+                                  // Create chat or get existing one between the users
+                                  final chatId = await firebaseService.createChatBetweenUsers(
+                                    _currentUserId ?? '',
+                                    otherParty.id,
+                                  );
+                                  
+                                  debugPrint("Created/Found chat with ID: $chatId");
+                                  
+                                  if (!mounted) return;
+                                  
+                                  // Navigate to chat screen with this chat
+                                  Navigator.pushNamed(
+                                    context, 
+                                    '${Routes.chat.split('/:')[0]}/$chatId',
+                                  );
+                                  
+                                  setState(() {
+                                    _isLoading = false;
+                                  });
+                                } catch (e) {
+                                  setState(() {
+                                    _isLoading = false;
+                                  });
+                                  
+                                  if (!mounted) return;
+                                  
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Error starting chat: ${e.toString()}'),
+                                      backgroundColor: AppColors.error,
+                                    ),
+                                  );
+                                  
+                                  // Fallback to old method if our new one fails
+                                  Navigator.pushNamed(
+                                    context, 
+                                    '${Routes.chat.split('/:')[0]}/${otherParty.id}',
+                                  );
+                                }
                               },
                             ),
                             IconButton(

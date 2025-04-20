@@ -1,10 +1,165 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Simple development rules - allow all operations
-    // IMPORTANT: These rules should be replaced with more restrictive rules for production
+    // Authentication helper function
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Check if the user is accessing their own data
+    function isCurrentUser(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Check if user is a doctor
+    function isDoctor() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'doctor';
+    }
+    
+    // Check if user is a patient
+    function isPatient() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'patient';
+    }
+    
+    // Users collection rules
+    match /users/{userId} {
+      // Allow users to read their own data or doctors/patients data (for listings)
+      allow get: if isCurrentUser(userId) || isAuthenticated();
+      // Only allow listing all users for authenticated users
+      allow list: if isAuthenticated();
+      // Allow users to create, update their own data
+      allow create, update: if isCurrentUser(userId);
+      // No deletion allowed
+      allow delete: if false;
+    }
+    
+    // Doctors collection rules
+    match /doctors/{doctorId} {
+      // Allow anyone to read doctor information
+      allow read: if isAuthenticated();
+      // Only the doctor can update their own info
+      allow write: if isCurrentUser(doctorId);
+    }
+    
+    // Appointments collection rules
+    match /appointments/{appointmentId} {
+      // Allow read if the user is either the patient or doctor for this appointment
+      allow read: if isAuthenticated() && 
+                  (resource.data.patientId == request.auth.uid || 
+                   resource.data.doctorId == request.auth.uid);
+      // Allow creating appointments for authenticated users
+      allow create: if isAuthenticated();
+      // Allow update if the user is either the patient or doctor
+      allow update: if isAuthenticated() && 
+                    (resource.data.patientId == request.auth.uid || 
+                     resource.data.doctorId == request.auth.uid);
+      // No deletion allowed
+      allow delete: if false;
+    }
+    
+    // Appointment slots collection
+    match /appointment_slots/{slotId} {
+      // Anyone can read slots
+      allow read: if isAuthenticated();
+      // Only the doctor who owns the slot can create/update
+      allow create, update: if isAuthenticated() && 
+                             request.resource.data.doctorId == request.auth.uid;
+      allow delete: if false;
+    }
+    
+    // Chats collection rules
+    match /chats/{chatId} {
+      // User can read a chat if they are a participant
+      allow read: if isAuthenticated() && 
+                  request.auth.uid in resource.data.participants;
+      // Anyone can create a chat with themselves as participant
+      allow create: if isAuthenticated() && 
+                    request.auth.uid in request.resource.data.participants;
+      // User can update a chat if they are a participant
+      allow update: if isAuthenticated() && 
+                    request.auth.uid in resource.data.participants;
+      allow delete: if false;
+    }
+    
+    // Messages in chats
+    match /messages/{messageId} {
+      // User can read messages if they are a participant in the associated chat
+      allow read: if isAuthenticated() && 
+                  exists(/databases/$(database)/documents/chats/$(resource.data.chatId)) &&
+                  request.auth.uid in get(/databases/$(database)/documents/chats/$(resource.data.chatId)).data.participants;
+      // User can create messages for chats they participate in
+      allow create: if isAuthenticated() && 
+                    request.resource.data.senderId == request.auth.uid &&
+                    exists(/databases/$(database)/documents/chats/$(request.resource.data.chatId)) &&
+                    request.auth.uid in get(/databases/$(database)/documents/chats/$(request.resource.data.chatId)).data.participants;
+      // No updates or deletions
+      allow update, delete: if false;
+    }
+    
+    // Pre-anamnesis collection
+    match /pre_anamnesis/{docId} {
+      allow read: if isAuthenticated() && 
+                  (resource.data.patientId == request.auth.uid || 
+                   resource.data.doctorId == request.auth.uid);
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+                    (resource.data.patientId == request.auth.uid || 
+                     resource.data.doctorId == request.auth.uid);
+      allow delete: if false;
+    }
+    
+    // Medical reports collection
+    match /medical_reports/{reportId} {
+      allow read: if isAuthenticated() && 
+                  (resource.data.patientId == request.auth.uid || 
+                   resource.data.doctorId == request.auth.uid);
+      allow create: if isAuthenticated() && isDoctor();
+      allow update: if isAuthenticated() && resource.data.doctorId == request.auth.uid;
+      allow delete: if false;
+    }
+    
+    // Shared medical documents
+    match /shared_medical_documents/{docId} {
+      allow read: if isAuthenticated() && 
+                  (resource.data.senderId == request.auth.uid || 
+                   resource.data.recipientId == request.auth.uid);
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+                    (resource.data.senderId == request.auth.uid || 
+                     resource.data.recipientId == request.auth.uid);
+      allow delete: if false;
+    }
+    
+    // Doctor ratings
+    match /doctor_ratings/{ratingId} {
+      // Anyone can read ratings
+      allow read: if isAuthenticated();
+      // Only patients can create ratings
+      allow create: if isAuthenticated() && isPatient();
+      // Only the creator can update their rating
+      allow update: if isAuthenticated() && resource.data.patientId == request.auth.uid;
+      allow delete: if false;
+    }
+    
+    // Invitations collection
+    match /invitations/{invitationId} {
+      allow read: if isAuthenticated() && 
+                  (resource.data.patientId == request.auth.uid || 
+                   resource.data.doctorId == request.auth.uid);
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+                    (resource.data.patientId == request.auth.uid || 
+                     resource.data.doctorId == request.auth.uid);
+      allow delete: if false;
+    }
+    
+    // Default deny all other operations
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 } 

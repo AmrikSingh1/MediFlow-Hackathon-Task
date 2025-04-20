@@ -10,6 +10,7 @@ import 'package:medi_connect/presentation/widgets/custom_text_field.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import 'package:medi_connect/presentation/pages/patient/find_doctor_page.dart';
 
 class DoctorProfilePage extends ConsumerStatefulWidget {
   const DoctorProfilePage({super.key});
@@ -60,6 +61,7 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
     'Other'
   ];
   String _selectedSpecialty = 'General Practitioner';
+  String _selectedCity = kAppCities.first;
   
   @override
   void initState() {
@@ -91,6 +93,7 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
           _phoneController.text = _currentUser!.phoneNumber ?? '';
           _addressController.text = doctorInfo['address'] ?? '';
           _bioController.text = doctorInfo['bio'] ?? '';
+          _selectedCity = doctorInfo['city'] ?? kAppCities.first;
         } else if (_currentUser != null) {
           // Set just the phone number if we have it
           _phoneController.text = _currentUser!.phoneNumber ?? '';
@@ -139,6 +142,7 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
           'education': _educationController.text,
           'address': _addressController.text,
           'bio': _bioController.text,
+          'city': _selectedCity,
         };
         
         // If we don't have a current user, create a dummy one for demo purposes
@@ -529,56 +533,99 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
               ),
               const SizedBox(height: 20),
               
-              // Specialty Dropdown
-              Container(
-                margin: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: const Color(0xFFE6E8F0),
-                    width: 1.5,
-                  ),
-                ),
-                child: DropdownButtonFormField<String>(
-                  value: _selectedSpecialty,
-                  decoration: InputDecoration(
-                    labelText: 'Specialty',
-                    labelStyle: AppTypography.bodyMedium.copyWith(
-                      color: const Color(0xFF718096),
-                    ),
-                    prefixIcon: const Icon(
-                      Icons.medical_services,
-                      color: Color(0xFF9AA5B1),
-                      size: 22,
-                    ),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 18,
+              // Specialty Field - Replace Dropdown with Custom Solution
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Specialty',
+                    style: AppTypography.bodyLarge.copyWith(
+                      fontWeight: FontWeight.w500,
+                      color: const Color(0xFF4A5568),
                     ),
                   ),
-                  items: _specialties.map((specialty) {
-                    return DropdownMenuItem(
-                      value: specialty,
-                      child: Text(specialty),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() {
-                        _selectedSpecialty = value;
-                      });
-                    }
-                  },
-                  dropdownColor: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  icon: const Icon(
-                    Icons.arrow_drop_down,
-                    color: Color(0xFF9AA5B1),
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: () {
+                      _showSpecialtySelectionDialog();
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF7FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: const Color(0xFFE2E8F0),
+                          width: 1,
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _selectedSpecialty,
+                              style: const TextStyle(
+                                color: Color(0xFF2D3748),
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          const Icon(Icons.arrow_drop_down, color: Color(0xFF8A70D6)),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
+              
+              const SizedBox(height: 24),
+              
+              // City Field - Replace Dropdown with Custom Solution
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Practice Location',
+                    style: AppTypography.bodyLarge.copyWith(
+                      fontWeight: FontWeight.w500,
+                      color: const Color(0xFF4A5568),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  GestureDetector(
+                    onTap: () {
+                      _showCitySelectionDialog();
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF7FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: const Color(0xFFE2E8F0),
+                          width: 1,
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _selectedCity,
+                              style: const TextStyle(
+                                color: Color(0xFF2D3748),
+                                fontSize: 16,
+                              ),
+                            ),
+                          ),
+                          const Icon(Icons.arrow_drop_down, color: Color(0xFF8A70D6)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 24),
               
               // Hospital Affiliation
               CustomTextField(
@@ -594,6 +641,8 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
                 },
               ),
               
+              const SizedBox(height: 16),
+              
               // License Number
               CustomTextField(
                 controller: _licenseNumberController,
@@ -607,6 +656,8 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
                   return null;
                 },
               ),
+              
+              const SizedBox(height: 16),
               
               // Years of Experience
               CustomTextField(
@@ -626,14 +677,14 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
                 },
               ),
               
+              const SizedBox(height: 16),
+              
               // Education
               CustomTextField(
                 controller: _educationController,
                 label: 'Education',
                 hint: 'e.g. MD, Harvard Medical School',
                 prefixIcon: Icons.school,
-                maxLines: 2,
-                contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'Please enter your education details';
@@ -669,6 +720,8 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
                 },
               ),
               
+              const SizedBox(height: 16),
+              
               // Address
               CustomTextField(
                 controller: _addressController,
@@ -676,8 +729,6 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
                 hint: 'Enter your office address',
                 prefixIcon: Icons.location_on,
                 keyboardType: TextInputType.streetAddress,
-                maxLines: 2,
-                contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'Please enter your office address';
@@ -686,19 +737,42 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
                 },
               ),
               
+              const SizedBox(height: 16),
+              
               // Bio
               CustomTextField(
                 controller: _bioController,
                 label: 'Professional Bio',
                 hint: 'Tell patients about yourself and your practice...',
                 prefixIcon: Icons.description,
-                maxLines: 4,
-                contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'Please enter your professional bio';
                   }
                   return null;
+                },
+              ),
+              
+              const SizedBox(height: 32),
+              
+              // Additional Actions Section
+              Text(
+                'Additional Actions',
+                style: AppTypography.titleLarge.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF2D3748),
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              // Invite Patients Button
+              _buildActionButton(
+                context: context,
+                title: 'Invite Patients',
+                subtitle: 'Invite patients to connect with you for appointments',
+                icon: Icons.person_add_outlined,
+                onTap: () {
+                  Navigator.of(context).pushNamed(Routes.invitePatient);
                 },
               ),
               
@@ -808,6 +882,161 @@ class _DoctorProfilePageState extends ConsumerState<DoctorProfilePage> {
       SnackBar(
         content: Text('Profile photo removed'),
         behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // Add these methods to show selection dialogs
+  void _showSpecialtySelectionDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Select Specialty',
+                  style: AppTypography.titleLarge.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 300,
+                  width: double.maxFinite,
+                  child: ListView.builder(
+                    itemCount: _specialties.length,
+                    itemBuilder: (context, index) {
+                      final specialty = _specialties[index];
+                      return ListTile(
+                        title: Text(specialty),
+                        onTap: () {
+                          setState(() {
+                            _selectedSpecialty = specialty;
+                          });
+                          Navigator.pop(context);
+                        },
+                        selected: _selectedSpecialty == specialty,
+                        selectedTileColor: AppColors.primary.withOpacity(0.1),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showCitySelectionDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Select Practice Location',
+                  style: AppTypography.titleLarge.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 300,
+                  width: double.maxFinite,
+                  child: ListView.builder(
+                    itemCount: kAppCities.length,
+                    itemBuilder: (context, index) {
+                      final city = kAppCities[index];
+                      return ListTile(
+                        title: Text(city),
+                        onTap: () {
+                          setState(() {
+                            _selectedCity = city;
+                          });
+                          Navigator.pop(context);
+                        },
+                        selected: _selectedCity == city,
+                        selectedTileColor: AppColors.primary.withOpacity(0.1),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildActionButton({
+    required BuildContext context,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              height: 60,
+              width: 60,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                icon,
+                color: AppColors.primary,
+                size: 30,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: AppTypography.bodyMedium.copyWith(
+                color: const Color(0xFF2D3748),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            Text(
+              subtitle,
+              style: AppTypography.bodySmall.copyWith(
+                color: const Color(0xFF718096),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

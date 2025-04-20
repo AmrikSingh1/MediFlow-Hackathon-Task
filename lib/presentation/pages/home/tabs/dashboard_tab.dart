@@ -12,6 +12,7 @@ import 'package:intl/intl.dart';
 import 'package:medi_connect/presentation/pages/home/home_page.dart';
 import 'package:medi_connect/core/config/routes.dart';
 import 'package:animated_text_kit/animated_text_kit.dart';
+import 'package:medi_connect/presentation/pages/patient/find_doctor_page.dart';
 
 // Providers
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
@@ -113,9 +114,6 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
   @override
   bool get wantKeepAlive => true;
   
-  // Current location - changed default to New Delhi
-  String _currentLocation = "New Delhi";
-  
   // List of major cities in India
   final List<String> _indianCities = [
     "New Delhi",
@@ -210,6 +208,8 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
 
   // Location Header with centered location selector
   Widget _buildLocationHeader(UserModel user) {
+    final currentLocation = ref.watch(currentLocationProvider);
+    
     return Container(
       padding: const EdgeInsets.only(top: 4, bottom: 0),
       color: AppColors.primary,
@@ -217,22 +217,11 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
         bottom: false,
         child: Column(
           children: [
-            // Header with profile and location integrated into a single row
+            // Header with location centered
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Row(
                 children: [
-                  // User Profile Avatar
-                  CircleAvatar(
-                    radius: 22,
-                    backgroundColor: Colors.white,
-                    backgroundImage: user.profileImageUrl != null
-                        ? NetworkImage(user.profileImageUrl!)
-                        : null,
-                    child: user.profileImageUrl == null
-                        ? const Icon(Icons.person, color: AppColors.primary, size: 28)
-                        : null,
-                  ),
                   Expanded(
                     child: Center(
                       child: InkWell(
@@ -255,7 +244,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
                               ),
                               const SizedBox(width: 4),
                               Text(
-                                _currentLocation,
+                                currentLocation,
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 15,
@@ -273,8 +262,6 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
                       ),
                     ),
                   ),
-                  // Balance the layout with empty space equal to avatar width
-                  const SizedBox(width: 44),
                 ],
               ),
             ),
@@ -300,115 +287,119 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
           maxChildSize: 0.9,
           expand: false,
           builder: (context, scrollController) {
-            return Column(
-              children: [
-                // Handle
-                Container(
-                  margin: const EdgeInsets.only(top: 10, bottom: 6),
-                  height: 4,
-                  width: 60,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                
-                // Header
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
-                  child: Row(
-                    children: [
-                      Text(
-                        'Select City',
-                        style: AppTypography.titleLarge.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Search
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  child: TextFormField(
-                    decoration: InputDecoration(
-                      hintText: 'Search cities...',
-                      prefixIcon: const Icon(Icons.search),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[100],
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                    ),
-                    onChanged: (value) {
-                      // Implement search functionality as needed
-                    },
-                  ),
-                ),
-                
-                // Divider
-                const Divider(),
-                
-                // List of cities
-                Expanded(
-                  child: ListView.builder(
-                    controller: scrollController,
-                    itemCount: _indianCities.length,
-                    itemBuilder: (context, index) {
-                      final city = _indianCities[index];
-                      final isSelected = city == _currentLocation;
-                      
-                      return ListTile(
-                        leading: Icon(
-                          Icons.location_city,
-                          color: isSelected ? AppColors.primary : Colors.grey[500],
-                        ),
-                        title: Text(
-                          city,
-                          style: TextStyle(
-                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                            color: isSelected ? AppColors.primary : AppColors.textPrimary,
-                          ),
-                        ),
-                        trailing: isSelected 
-                            ? const Icon(Icons.check_circle, color: AppColors.primary)
-                            : null,
-                        onTap: () {
-                          setState(() {
-                            _currentLocation = city;
-                          });
-                          Navigator.pop(context);
-
-                          // Show feedback
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Location updated to $city'),
-                              behavior: SnackBarBehavior.floating,
-                              backgroundColor: AppColors.success,
-                              duration: const Duration(seconds: 1),
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
-            );
+            return _buildLocationPickerContent(context, scrollController);
           },
         );
       },
+    );
+  }
+  
+  Widget _buildLocationPickerContent(BuildContext context, ScrollController scrollController) {
+    final currentLocation = ref.watch(currentLocationProvider);
+    
+    return Column(
+      children: [
+        // Handle
+        Container(
+          margin: const EdgeInsets.only(top: 10, bottom: 6),
+          height: 4,
+          width: 60,
+          decoration: BoxDecoration(
+            color: Colors.grey[300],
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        
+        // Header
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+          child: Row(
+            children: [
+              Text(
+                'Select City',
+                style: AppTypography.titleLarge.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        ),
+
+        // Search
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          child: TextFormField(
+            decoration: InputDecoration(
+              hintText: 'Search cities...',
+              prefixIcon: const Icon(Icons.search),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              filled: true,
+              fillColor: Colors.grey[100],
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
+            ),
+            onChanged: (value) {
+              // Implement search functionality as needed
+            },
+          ),
+        ),
+        
+        // Divider
+        const Divider(),
+        
+        // List of cities
+        Expanded(
+          child: ListView.builder(
+            controller: scrollController,
+            itemCount: _indianCities.length,
+            itemBuilder: (context, index) {
+              final city = _indianCities[index];
+              final isSelected = city == currentLocation;
+              
+              return ListTile(
+                leading: Icon(
+                  Icons.location_city,
+                  color: isSelected ? AppColors.primary : Colors.grey[500],
+                ),
+                title: Text(
+                  city,
+                  style: TextStyle(
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    color: isSelected ? AppColors.primary : AppColors.textPrimary,
+                  ),
+                ),
+                trailing: isSelected 
+                    ? const Icon(Icons.check_circle, color: AppColors.primary)
+                    : null,
+                onTap: () {
+                  ref.read(currentLocationProvider.notifier).state = city;
+                  Navigator.pop(context);
+
+                  // Show feedback
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Location updated to $city'),
+                      behavior: SnackBarBehavior.floating,
+                      backgroundColor: AppColors.success,
+                      duration: const Duration(seconds: 1),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -501,12 +492,12 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
           Expanded(
             child: InkWell(
               onTap: () {
-                Navigator.pushNamed(context, Routes.bookAppointment);
+                Navigator.pushNamed(context, Routes.findDoctor);
               },
               child: Container(
                 height: 210, // Reduced height from 240 to fix overflow
                 decoration: BoxDecoration(
-                  color: Colors.lightBlue.shade100.withOpacity(0.3),
+                  color: Colors.blue.shade100.withOpacity(0.3),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Column(
@@ -581,7 +572,18 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
           Expanded(
             child: InkWell(
               onTap: () {
-                Navigator.pushNamed(context, Routes.bookAppointment);
+                // Show coming soon message
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'This feature is coming soon!',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    backgroundColor: AppColors.primary,
+                    behavior: SnackBarBehavior.floating,
+                    duration: Duration(seconds: 2),
+                  ),
+                );
               },
               child: Container(
                 height: 210, // Reduced height from 240 to fix overflow
@@ -598,8 +600,8 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
                           topLeft: Radius.circular(16),
                           topRight: Radius.circular(16),
                         ),
-                        child: Image.network(
-                          'https://images.unsplash.com/photo-1576091160550-2173dba999ef?q=80&w=1000&auto=format&fit=crop',
+                        child: Image.asset(
+                          'assets/images/Instant-Video-Consultation.jpeg',
                           fit: BoxFit.cover,
                           width: double.infinity,
                           errorBuilder: (context, error, stackTrace) {
@@ -668,32 +670,32 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
         'color': Colors.blue.shade100,
       },
       {
-        'title': 'Skin & Hair',
+        'title': 'Dermatologist',
         'icon': 'assets/icons/skin.png',
         'color': Colors.purple.shade100,
       },
       {
-        'title': 'Women\'s Health',
+        'title': 'Gynecologist',
         'icon': 'assets/icons/woman.png',
         'color': Colors.pink.shade100,
       },
       {
-        'title': 'Dental Care',
+        'title': 'Dentist',
         'icon': 'assets/icons/tooth.png',
         'color': Colors.orange.shade100,
       },
       {
-        'title': 'Child Specialist',
+        'title': 'Pediatrician',
         'icon': 'assets/icons/baby.png',
         'color': Colors.purple.shade100,
       },
       {
-        'title': 'Ear, Nose, Throat',
+        'title': 'ENT Specialist',
         'icon': 'assets/icons/ear.png',
         'color': Colors.teal.shade100,
       },
       {
-        'title': 'Mental Wellness',
+        'title': 'Psychiatrist',
         'icon': 'assets/icons/brain.png',
         'color': Colors.red.shade100,
       },
@@ -718,16 +720,16 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
         ),
         // Using SizedBox to limit height and avoid overflow
         SizedBox(
-          height: 210, // Fixed height to prevent overflow
+          height: 190, // Reduced height to make the layout more compact
           child: GridView.builder(
             physics: const NeverScrollableScrollPhysics(),
             shrinkWrap: true,
             padding: const EdgeInsets.symmetric(horizontal: 16),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 4,
-              crossAxisSpacing: 8, // Reduced spacing
-              mainAxisSpacing: 0, // Reduced spacing
-              childAspectRatio: 0.9, // Adjusted ratio
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 4, // Reduced spacing between rows from 12 to 4
+              childAspectRatio: 0.85, // Adjusted ratio to be slightly wider and less tall
             ),
             itemCount: healthCategories.length,
             itemBuilder: (context, index) {
@@ -745,8 +747,8 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 60, // Reduced size
-                      height: 60, // Reduced size
+                      width: 55,
+                      height: 55,
                       decoration: BoxDecoration(
                         color: category['color'] as Color,
                         borderRadius: BorderRadius.circular(12),
@@ -754,30 +756,32 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
                       child: Center(
                         child: category['title'] == 'more'
                             ? Text(
-                                '20+',
+                                '10+',
                                 style: TextStyle(
                                   color: Colors.indigo.shade700,
-                                  fontSize: 18, // Slightly smaller
+                                  fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                 ),
                               )
                             : Icon(
                                 _getIconForCategory(category['title'] as String),
                                 color: Colors.indigo.shade700,
-                                size: 26, // Smaller icon
+                                size: 24,
                               ),
                       ),
                     ),
-                    const SizedBox(height: 4), // Reduced spacing
-                    Text(
-                      category['title'] as String,
-                      textAlign: TextAlign.center,
-                      style: AppTypography.bodySmall.copyWith(
-                        fontWeight: FontWeight.w500,
-                        fontSize: 11, // Smaller text
+                    const SizedBox(height: 4), // Reduced spacing between icon and text from 6 to 4
+                    Flexible(
+                      child: Text(
+                        category['title'] as String,
+                        textAlign: TextAlign.center,
+                        style: AppTypography.bodySmall.copyWith(
+                          fontWeight: FontWeight.w500,
+                          fontSize: 10,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
@@ -932,14 +936,35 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 30),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+        
+        // Modern header with gradient background
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                AppColors.primary.withOpacity(0.9),
+                AppColors.primary.withOpacity(0.7),
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.primary.withOpacity(0.2),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          margin: const EdgeInsets.symmetric(horizontal: 20),
           child: Text(
             'Our community of doctors and patients drive us to create technologies for better and affordable healthcare',
-            style: TextStyle(
-              fontSize: 20,
+            style: AppTypography.headlineSmall.copyWith(
               fontWeight: FontWeight.w600,
-              color: Colors.black.withOpacity(0.8),
+              color: Colors.white,
               height: 1.3,
             ),
           ),
@@ -954,68 +979,38 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
             children: [
               // Our Users
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.person,
-                      color: AppColors.primary,
-                      size: 28,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Our Users',
-                      style: TextStyle(
-                        color: Colors.grey.shade600,
-                        fontSize: 14,
-                      ),
-                    ),
-                    Text(
-                      '30 Crores',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 28,
-                        color: Colors.black.withOpacity(0.8),
-                      ),
-                    ),
-                  ],
+                child: _buildStatsCard(
+                  icon: Icons.person_rounded,
+                  title: 'Our Users',
+                  value: '30 Crores',
+                  iconColor: AppColors.accent,
+                  gradient: const LinearGradient(
+                    colors: [Colors.white, Color(0xFFF0F4FF)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
                 ),
               ),
-              
+              const SizedBox(width: 16),
               // Our Doctors
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.medical_services,
-                      color: AppColors.primary,
-                      size: 28, 
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Our Doctors',
-                      style: TextStyle(
-                        color: Colors.grey.shade600,
-                        fontSize: 14,
-                      ),
-                    ),
-                    Text(
-                      '1 Lakh',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 28,
-                        color: Colors.black.withOpacity(0.8),
-                      ),
-                    ),
-                  ],
+                child: _buildStatsCard(
+                  icon: Icons.medical_services_rounded,
+                  title: 'Our Doctors',
+                  value: '1 Lakh',
+                  iconColor: AppColors.primary,
+                  gradient: const LinearGradient(
+                    colors: [Colors.white, Color(0xFFF9F1FF)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
                 ),
               ),
             ],
           ),
         ),
         
-        const SizedBox(height: 32),
+        const SizedBox(height: 16),
         
         // Second row - Hospitals and Patient Stories
         Padding(
@@ -1024,61 +1019,31 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
             children: [
               // Hospitals
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.local_hospital,
-                      color: AppColors.primary,
-                      size: 28,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Hospitals',
-                      style: TextStyle(
-                        color: Colors.grey.shade600,
-                        fontSize: 14,
-                      ),
-                    ),
-                    Text(
-                      '20,000',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 28,
-                        color: Colors.black.withOpacity(0.8),
-                      ),
-                    ),
-                  ],
+                child: _buildStatsCard(
+                  icon: Icons.local_hospital_rounded,
+                  title: 'Hospitals',
+                  value: '20,000',
+                  iconColor: AppColors.secondary,
+                  gradient: const LinearGradient(
+                    colors: [Colors.white, Color(0xFFF0FDFA)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
                 ),
               ),
-              
+              const SizedBox(width: 16),
               // Patient Stories
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.chat_bubble_outline,
-                      color: AppColors.primary,
-                      size: 28,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Patient Stories',
-                      style: TextStyle(
-                        color: Colors.grey.shade600,
-                        fontSize: 14,
-                      ),
-                    ),
-                    Text(
-                      '40 Lakh',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 28,
-                        color: Colors.black.withOpacity(0.8),
-                      ),
-                    ),
-                  ],
+                child: _buildStatsCard(
+                  icon: Icons.chat_bubble_rounded,
+                  title: 'Patient Stories',
+                  value: '40 Lakh',
+                  iconColor: AppColors.success,
+                  gradient: const LinearGradient(
+                    colors: [Colors.white, Color(0xFFF0FFF4)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
                 ),
               ),
             ],
@@ -1087,30 +1052,54 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
         
         const SizedBox(height: 40),
         
-        // Vision statement container - flat blue background
+        // Vision statement container with refined design
         Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
-          color: AppColors.primary,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                AppColors.primary,
+                AppColors.primaryDark,
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
           child: Column(
             children: [
-              Text(
-                'MediFlow',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 34,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1,
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.health_and_safety_rounded,
+                    color: Colors.white.withOpacity(0.9),
+                    size: 30,
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    'MediFlow',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 34,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 24),
-              Text(
-                'Our vision is to help mankind live healthier, longer lives by making quality healthcare accessible.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  height: 1.5,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  'Our vision is to help mankind live healthier, longer lives by making quality healthcare accessible.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    height: 1.5,
+                    letterSpacing: 0.3,
+                  ),
                 ),
               ),
             ],
@@ -1119,23 +1108,83 @@ class _DashboardTabState extends ConsumerState<DashboardTab> with AutomaticKeepA
       ],
     );
   }
+  
+  // Helper method to build consistent stat cards
+  Widget _buildStatsCard({
+    required IconData icon,
+    required String title,
+    required String value,
+    required Color iconColor,
+    required Gradient gradient,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: gradient,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            spreadRadius: 0,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: iconColor.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              icon,
+              color: iconColor,
+              size: 24,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 26,
+              color: Colors.black.withOpacity(0.8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   // Helper method to get icons for each category
   IconData _getIconForCategory(String category) {
     switch (category) {
       case 'General Physician':
         return Icons.medical_services;
-      case 'Skin & Hair':
+      case 'Dermatologist':
         return Icons.face;
-      case 'Women\'s Health':
+      case 'Gynecologist':
         return Icons.pregnant_woman;
-      case 'Dental Care':
+      case 'Dentist':
         return Icons.cleaning_services;
-      case 'Child Specialist':
+      case 'Pediatrician':
         return Icons.child_care;
-      case 'Ear, Nose, Throat':
+      case 'ENT Specialist':
         return Icons.hearing;
-      case 'Mental Wellness':
+      case 'Psychiatrist':
         return Icons.psychology;
       default:
         return Icons.add;

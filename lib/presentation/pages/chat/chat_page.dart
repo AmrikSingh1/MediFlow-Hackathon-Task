@@ -43,6 +43,7 @@ class ChatMessage {
   final AttachmentType attachmentType;
   final Duration? audioDuration;
   final Map<String, dynamic>? metadata;
+  final bool isTyping;
   
   ChatMessage({
     required this.id,
@@ -54,6 +55,7 @@ class ChatMessage {
     this.attachmentType = AttachmentType.none,
     this.audioDuration,
     this.metadata,
+    this.isTyping = false,
   });
 }
 
@@ -138,6 +140,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     _loadChatData();
     _testAIConnection();
     
+    // Check and create a valid chat connection
+    _checkAndCreateChatConnection();
+    
     // Initialize AI service
     _aiService = ref.read(aiServiceProvider);
     _currentModelId = _aiService.currentModelId;
@@ -158,6 +163,43 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     });
   }
   
+  // Method to check and create a valid chat connection if needed
+  Future<void> _checkAndCreateChatConnection() async {
+    try {
+      final firebaseService = ref.read(firebaseServiceProvider);
+      final authService = ref.read(authServiceProvider);
+      final user = await authService.getCurrentUser();
+      
+      if (user == null) {
+        debugPrint('Cannot check chat connection: user not logged in');
+        return;
+      }
+      
+      // Skip for AI assistant chat which has a fixed ID
+      if (widget.chatId == '3') {
+        return;
+      }
+      
+      // Check if we're using a user ID as chat ID (doctor-patient direct chat)
+      final otherUserId = widget.chatId;
+      if (otherUserId.isNotEmpty && otherUserId != user.uid) {
+        debugPrint('Checking chat connection between ${user.uid} and $otherUserId');
+        
+        // Try to create a chat connection, or get the existing one
+        final chatId = await firebaseService.createChatBetweenUsers(user.uid, otherUserId);
+        
+        // If the chatId is different than the current widget.chatId, we would
+        // ideally navigate to the correct chat. However, since we can't modify the
+        // widget chatId property, we'll just use what we have.
+        if (chatId != widget.chatId) {
+          debugPrint('Note: Real chat ID is $chatId but using ${widget.chatId}');
+        }
+      }
+    } catch (e) {
+      debugPrint('Error checking chat connection: $e');
+    }
+  }
+  
   // Save all existing messages to Firestore
   Future<void> _saveAllMessagesToFirestore() async {
     try {
@@ -171,6 +213,13 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       }
       
       debugPrint('Saving all ${_messages.length} messages to Firestore');
+      
+      // Ensure chat document exists first
+      final chatExists = await _ensureChatExists(firebaseService, user.uid);
+      if (!chatExists) {
+        debugPrint('Could not create or verify chat document');
+        return;
+      }
       
       // Save each message to Firestore
       for (final message in _messages) {
@@ -216,6 +265,72 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       }
     } catch (e) {
       debugPrint('Error saving all messages to Firestore: $e');
+    }
+  }
+  
+  // Helper method to ensure the chat document exists
+  Future<bool> _ensureChatExists(FirebaseService firebaseService, String userId) async {
+    try {
+      // Check if chat document exists
+      final chatDoc = await FirebaseFirestore.instance
+          .collection('chats')
+          .doc(widget.chatId)
+          .get();
+      
+      if (!chatDoc.exists) {
+        debugPrint('Chat document does not exist. Creating it...');
+        
+        // Get the other participant details (assuming it's a doctor or assistant chat)
+        String otherParticipantId = '';
+        String? otherParticipantName;
+        
+        if (widget.chatId == '3') {
+          // AI Assistant chat
+          otherParticipantId = 'ai-assistant';
+          otherParticipantName = 'MediConnect Assistant';
+        } else {
+          // Check if the chatId represents a doctor/user ID
+          otherParticipantId = widget.chatId;
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(otherParticipantId)
+              .get();
+          
+          if (userDoc.exists) {
+            otherParticipantName = userDoc.data()?['name'];
+          }
+        }
+        
+        if (otherParticipantId.isEmpty) {
+          debugPrint('Could not determine other participant ID');
+          return false;
+        }
+        
+        // Create the chat document
+        await FirebaseFirestore.instance.collection('chats').doc(widget.chatId).set({
+          'participants': [userId, otherParticipantId],
+          'lastMessage': _messages.isNotEmpty ? _messages.last.text : '',
+          'lastMessageTime': _messages.isNotEmpty 
+              ? Timestamp.fromDate(_messages.last.timestamp) 
+              : Timestamp.now(),
+          'unreadCount': 0,
+          'createdAt': Timestamp.now(),
+          'updatedAt': Timestamp.now(),
+          'participantDetails': {
+            otherParticipantId: {
+              'name': otherParticipantName ?? 'Unknown User',
+              'role': widget.chatId == '3' ? 'assistant' : 'doctor',
+            }
+          }
+        });
+        
+        debugPrint('Chat document created successfully');
+      }
+      
+      return true;
+    } catch (e) {
+      debugPrint('Error ensuring chat exists: $e');
+      return false;
     }
   }
   
@@ -1181,8 +1296,18 @@ class _ChatPageState extends ConsumerState<ChatPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Show typing indicator if message is a typing indicator
+                if (message.isTyping)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildTypingDot(0),
+                      _buildTypingDot(1),
+                      _buildTypingDot(2),
+                    ],
+                  )
                 // Show text content if present and not a voice message
-                if (message.text.isNotEmpty && message.attachmentType != AttachmentType.audio)
+                else if (message.text.isNotEmpty && message.attachmentType != AttachmentType.audio)
                   Text(
                     message.text,
                     style: TextStyle(
@@ -1192,42 +1317,43 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                   ),
                 
                 // Show attachment based on type
-                if (message.attachmentType == AttachmentType.audio) 
+                if (!message.isTyping && message.attachmentType == AttachmentType.audio) 
                   _buildAudioMessageBubble(message)
-                else if (message.attachmentUrl != null && message.attachmentType != AttachmentType.none) 
+                else if (!message.isTyping && message.attachmentUrl != null && message.attachmentType != AttachmentType.none) 
                   _buildAttachmentByType(message),
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (isAI) 
-                  const Icon(
-                    Icons.smart_toy, 
-                    size: 12, 
-                    color: AppColors.textTertiary,
+          if (!message.isTyping)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isAI) 
+                    const Icon(
+                      Icons.smart_toy, 
+                      size: 12, 
+                      color: AppColors.textTertiary,
+                    ),
+                  if (isAI) 
+                    const SizedBox(width: 4),
+                  Text(
+                    timeString,
+                    style: AppTypography.bodySmall.copyWith(
+                      color: AppColors.textTertiary,
+                    ),
                   ),
-                if (isAI) 
                   const SizedBox(width: 4),
-                Text(
-                  timeString,
-                  style: AppTypography.bodySmall.copyWith(
-                    color: AppColors.textTertiary,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                if (message.isUser && message.isRead)
-                  const Icon(
-                    Icons.done_all,
-                    size: 14,
-                    color: AppColors.success,
-                  ),
-              ],
+                  if (message.isUser && message.isRead)
+                    const Icon(
+                      Icons.done_all,
+                      size: 14,
+                      color: AppColors.success,
+                    ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -2705,6 +2831,161 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         _scrollToBottom();
       }
     }
+  }
+
+  Future<void> _sendMessageToAI(String messageText) async {
+    // Add message to conversation history for AI context
+    _conversationHistory.add({
+      'role': 'user',
+      'content': messageText
+    });
+     
+    // Add a temporary "typing" indicator message
+    final tempMessageId = 'typing-${DateTime.now().millisecondsSinceEpoch}';
+    setState(() {
+      _messages.add(ChatMessage(
+        id: tempMessageId,
+        text: '',
+        isUser: false,
+        timestamp: DateTime.now(),
+        isTyping: true,
+      ));
+      _scrollToBottom();
+    });
+      
+    try {
+      // Use the AIService to generate a response
+      final aiService = ref.read(aiServiceProvider);
+        
+      // Debug logging
+      debugPrint("ChatPage: Sending message to AI: ${messageText.substring(0, math.min(messageText.length, 50))}...");
+       
+      // Send the message to the AI service with retry
+      final response = await _getAIResponseWithRetry(aiService, messageText);
+       
+      // Remove typing indicator
+      setState(() {
+        _messages.removeWhere((msg) => msg.id == tempMessageId);
+      });
+        
+      if (response != null) {
+        // Add AI response message
+        setState(() {
+          _messages.add(ChatMessage(
+            id: 'ai-${DateTime.now().millisecondsSinceEpoch}',
+            text: response,
+            isUser: false,
+            timestamp: DateTime.now(),
+          ));
+        });
+          
+        // Add message to conversation history for AI context
+        _conversationHistory.add({
+          'role': 'assistant',
+          'content': response
+        });
+      } else {
+        // Add error message if response is null
+        setState(() {
+          String errorMessage;
+          switch (_selectedLanguage) {
+            case 'hindi':
+              errorMessage = 'मुझे क्षमा करें, आपके प्रश्न का उत्तर देते समय मुझे एक समस्या का सामना करना पड़ा। कृपया एक अलग प्रश्न के साथ फिर से प्रयास करें।';
+              break;
+            case 'hinglish':
+              errorMessage = 'Sorry, aapke question ka answer dete waqt mujhe ek problem hui. Kripya apna question dobara poochein ya thodi der baad try karein.';
+              break;
+            default:
+              errorMessage = 'I apologize, but I encountered an error while processing your question. Could you please try again with a different question?';
+          }
+            
+          _messages.add(ChatMessage(
+            id: 'ai-error-${DateTime.now().millisecondsSinceEpoch}',
+            text: errorMessage,
+            isUser: false,
+            timestamp: DateTime.now(),
+          ));
+        });
+      }
+        
+      // Scroll to bottom after adding message
+      _scrollToBottom();
+        
+    } catch (e) {
+      // Remove typing indicator
+      setState(() {
+        _messages.removeWhere((msg) => msg.id == tempMessageId);
+      });
+        
+      // Add error message
+      setState(() {
+        String errorMessage;
+        switch (_selectedLanguage) {
+          case 'hindi':
+            errorMessage = 'मुझे क्षमा करें, आपके प्रश्न का उत्तर देते समय मुझे एक समस्या का सामना करना पड़ा। कृपया एक अलग प्रश्न के साथ फिर से प्रयास करें।';
+            break;
+          case 'hinglish':
+            errorMessage = 'Sorry, aapke question ka answer dete waqt mujhe ek problem hui. Kripya apna question dobara poochein ya thodi der baad try karein.';
+            break;
+          default:
+            errorMessage = 'I apologize, but I encountered an error while processing your question. Could you please try again with a different question?';
+        }
+          
+        _messages.add(ChatMessage(
+          id: 'ai-error-${DateTime.now().millisecondsSinceEpoch}',
+          text: errorMessage,
+          isUser: false,
+          timestamp: DateTime.now(),
+        ));
+      });
+        
+      // Log the error
+      debugPrint("ChatPage: Error processing message with AI: $e");
+        
+      // Scroll to bottom after adding error message
+      _scrollToBottom();
+    }
+  }
+ 
+  // Helper method to get AI response with retry mechanism
+  Future<String?> _getAIResponseWithRetry(AIService aiService, String prompt) async {
+    const maxRetries = 2;
+    int retryCount = 0;
+     
+    while (retryCount <= maxRetries) {
+      try {
+        final response = await aiService.generateResponse(
+          prompt: prompt,
+          conversationHistory: _conversationHistory,
+          language: _selectedLanguage,
+        );
+         
+        // Check if response is valid and not an error message
+        if (response.isNotEmpty && 
+            !response.contains("I apologize, but I encountered an error") &&
+            !response.contains("मुझे क्षमा करें") && // Hindi error start
+            !response.contains("Sorry, aapke")) {  // Hinglish error start
+          return response;
+        } else {
+          retryCount++;
+          if (retryCount <= maxRetries) {
+            debugPrint("ChatPage: Invalid response, retrying ($retryCount/$maxRetries)");
+            await Future.delayed(Duration(milliseconds: 500 * retryCount));
+          }
+        }
+      } catch (e) {
+        retryCount++;
+        if (retryCount <= maxRetries) {
+          debugPrint("ChatPage: Error in AI response, retrying ($retryCount/$maxRetries): $e");
+          await Future.delayed(Duration(milliseconds: 800 * retryCount));
+        } else {
+          debugPrint("ChatPage: Max retries reached, giving up: $e");
+          return null;
+        }
+      }
+    }
+     
+    return null; // Return null if all retries failed
   }
 }
 

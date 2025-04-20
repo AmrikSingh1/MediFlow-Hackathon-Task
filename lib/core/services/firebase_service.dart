@@ -13,6 +13,10 @@ import 'package:medi_connect/core/models/patient_model.dart';
 import 'package:medi_connect/core/models/appointment_slot_model.dart';
 import 'package:intl/intl.dart';
 import 'package:medi_connect/core/models/prescription_model.dart';
+import 'package:medi_connect/core/models/report_model.dart';
+import 'package:medi_connect/core/models/invitation_model.dart';
+import 'dart:math';
+import 'package:medi_connect/core/models/referral_code_model.dart';
 
 class FirebaseService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -25,6 +29,9 @@ class FirebaseService {
   final String _messagesCollection = 'messages';
   final String _preAnamnesisCollection = 'pre_anamnesis';
   final String _doctorsCollection = 'doctors';
+  final String _reportsCollection = 'medical_reports';
+  final String _invitationsCollection = 'invitations';
+  final String _referralCodesCollection = 'referralCodes';
   // Remove unused fields but keep commented for reference
   // final String _patientsCollection = 'patients';
   // final String _appointmentSlotsCollection = 'appointment_slots';
@@ -204,82 +211,45 @@ class FirebaseService {
   // Helper method to get doctor details for embedding in appointment
   Future<Map<String, dynamic>> _getDoctorDetailsForAppointment(String doctorId) async {
     try {
-      debugPrint("FirebaseService: Getting doctor details for appointment, doctorId: $doctorId");
-      final doctor = await getUserById(doctorId);
+      final UserModel? doctor = await getUserById(doctorId);
       if (doctor == null) {
-        debugPrint("FirebaseService: Doctor not found, using default details");
-        return {
-          'name': 'Unknown Doctor',
-          'specialty': 'Not specified',
-        };
+        return {'name': 'Unknown', 'id': doctorId};
       }
-      
-      debugPrint("FirebaseService: Doctor found: ${doctor.name}");
-      
-      // Extract specialty from medicalInfo or doctorInfo
-      String? specialty;
-      if (doctor.doctorInfo != null && doctor.doctorInfo!.containsKey('specialty')) {
-        specialty = doctor.doctorInfo!['specialty'];
-      }
-      
+
       return {
+        'id': doctor.id,
         'name': doctor.name,
-        'specialty': specialty ?? 'Not specified',
-        'profileImageUrl': doctor.profileImageUrl,
+        'email': doctor.email,
         'phoneNumber': doctor.phoneNumber,
+        'profileImageUrl': doctor.profileImageUrl,
+        'specialty': doctor.role == UserRole.doctor ? (doctor as DoctorModel).specialty : null,
       };
     } catch (e) {
-      debugPrint("FirebaseService: Error getting doctor details: $e");
-      return {
-        'name': 'Unknown Doctor',
-        'specialty': 'Not specified',
-      };
+      debugPrint('Error getting doctor details: $e');
+      return {'name': 'Unknown', 'id': doctorId};
     }
   }
   
   // Helper method to get patient details for embedding in appointment
   Future<Map<String, dynamic>> _getPatientDetailsForAppointment(String patientId) async {
     try {
-      debugPrint("FirebaseService: Getting patient details for appointment, patientId: $patientId");
-      final patient = await getUserById(patientId);
+      final UserModel? patient = await getUserById(patientId);
       if (patient == null) {
-        debugPrint("FirebaseService: Patient not found, using default details");
-        return {
-          'name': 'Unknown Patient',
-        };
+        return {'name': 'Unknown', 'id': patientId};
       }
-      
-      debugPrint("FirebaseService: Patient found: ${patient.name}");
-      
-      // Extract age from medicalInfo
-      String? age;
-      if (patient.medicalInfo != null && patient.medicalInfo!.containsKey('dateOfBirth')) {
-        final dob = patient.medicalInfo!['dateOfBirth'];
-        // Simple age calculation (can be improved)
-        if (dob is String && dob.isNotEmpty) {
-          try {
-            final dobDate = DateTime.parse(dob);
-            final now = DateTime.now();
-            age = (now.year - dobDate.year).toString();
-            debugPrint("FirebaseService: Calculated patient age: $age");
-          } catch (e) {
-            debugPrint("FirebaseService: Error calculating age: $e");
-            age = 'Unknown';
-          }
-        }
-      }
-      
+
       return {
+        'id': patient.id,
         'name': patient.name,
-        'age': age ?? 'Unknown',
-        'profileImageUrl': patient.profileImageUrl,
+        'email': patient.email,
         'phoneNumber': patient.phoneNumber,
+        'profileImageUrl': patient.profileImageUrl,
+        'dateOfBirth': patient.role == UserRole.patient ? (patient as PatientModel).dateOfBirth : null,
+        'gender': patient.role == UserRole.patient ? (patient as PatientModel).gender : null,
       };
     } catch (e) {
-      debugPrint("FirebaseService: Error getting patient details: $e");
-      return {
-        'name': 'Unknown Patient',
-      };
+      debugPrint('Error getting patient details: $e');
+      return {'name': 'Unknown', 'id': patientId};
     }
   }
   
@@ -490,8 +460,39 @@ class FirebaseService {
   Future<String> createChat(ChatModel chat) async {
     try {
       debugPrint("FirebaseService: Creating new chat with ID ${chat.id}");
-      final chatId = _uuid.v4();
-      final chatWithId = chat.copyWith(id: chatId);
+      final chatId = chat.id.isEmpty ? _uuid.v4() : chat.id;
+      
+      // Check if we need to fetch participant details
+      Map<String, dynamic>? participantDetails = chat.participantDetails;
+      if (participantDetails == null || participantDetails.isEmpty) {
+        participantDetails = {};
+        // Try to fetch details for each participant
+        for (final participantId in chat.participants) {
+          try {
+            final userDoc = await _firestore.collection(_usersCollection).doc(participantId).get();
+            if (userDoc.exists) {
+              final userData = userDoc.data() as Map<String, dynamic>?;
+              if (userData != null) {
+                participantDetails[participantId] = {
+                  'name': userData['name'] ?? 'Unknown User',
+                  'role': userData['role'] ?? 'user',
+                  'profileImageUrl': userData['profileImageUrl'],
+                };
+              }
+            }
+          } catch (e) {
+            debugPrint("FirebaseService: Error fetching participant details: $e");
+          }
+        }
+      }
+      
+      final chatWithId = chat.copyWith(
+        id: chatId,
+        participantDetails: participantDetails,
+        createdAt: chat.createdAt,
+        updatedAt: Timestamp.now(),
+      );
+      
       await _firestore.collection(_chatsCollection).doc(chatId).set(chatWithId.toMap());
       debugPrint("FirebaseService: Chat created successfully");
       return chatId;
@@ -559,14 +560,16 @@ class FirebaseService {
   Future<void> updateChatLastMessage(String chatId, String message, Timestamp timestamp) async {
     try {
       debugPrint("FirebaseService: Updating last message for chat $chatId");
-      await _firestore.collection(_chatsCollection).doc(chatId).update({
+      // Use set with merge option instead of update to create the document if it doesn't exist
+      await _firestore.collection(_chatsCollection).doc(chatId).set({
         'lastMessage': message,
         'lastMessageTime': timestamp,
-        'updatedAt': timestamp,
-      });
+        'updatedAt': Timestamp.now(),
+      }, SetOptions(merge: true));
       debugPrint("FirebaseService: Chat last message updated successfully");
     } catch (e) {
       debugPrint("FirebaseService: Error updating chat last message: $e");
+      // Rethrow to handle at call site
       rethrow;
     }
   }
@@ -1812,7 +1815,7 @@ class FirebaseService {
   Future<String> createPrescription(PrescriptionModel prescription) async {
     try {
       debugPrint("FirebaseService: Creating new prescription");
-      // Generate new ID for the prescription if not provided
+      // Generate new ID if not provided
       final prescriptionId = prescription.id.isEmpty ? _uuid.v4() : prescription.id;
       final prescriptionWithId = prescription.copyWith(id: prescriptionId);
       
@@ -1820,21 +1823,21 @@ class FirebaseService {
       final doctorDetails = await _getDoctorDetailsForAppointment(prescription.doctorId);
       final patientDetails = await _getPatientDetailsForAppointment(prescription.patientId);
       
-      debugPrint("FirebaseService: Doctor details fetched: ${doctorDetails['name']}");
-      debugPrint("FirebaseService: Patient details fetched: ${patientDetails['name']}");
-      
       // Create a complete prescription with doctor and patient details
       final completePrescription = prescriptionWithId.copyWith(
         doctorDetails: doctorDetails,
-        patientDetails: patientDetails
+        patientDetails: patientDetails,
+        updatedAt: Timestamp.now()
       );
       
       // Convert prescription to map
       final prescriptionMap = completePrescription.toMap();
-      debugPrint("FirebaseService: Prescription data: $prescriptionMap");
+      
+      // Create a collection for prescriptions
+      final prescriptionsCollection = 'prescriptions';
       
       // Save to Firestore
-      await _firestore.collection('prescriptions').doc(prescriptionId).set(prescriptionMap);
+      await _firestore.collection(prescriptionsCollection).doc(prescriptionId).set(prescriptionMap);
       
       debugPrint("FirebaseService: Prescription created successfully with ID: $prescriptionId");
       
@@ -1848,93 +1851,208 @@ class FirebaseService {
   
   Future<PrescriptionModel?> getPrescriptionById(String prescriptionId) async {
     try {
-      final docSnapshot = await _firestore
-          .collection('prescriptions')
-          .doc(prescriptionId)
-          .get();
+      debugPrint("FirebaseService: Fetching prescription with ID $prescriptionId");
+      final prescriptionsCollection = 'prescriptions';
       
-      if (!docSnapshot.exists) {
+      final doc = await _firestore.collection(prescriptionsCollection).doc(prescriptionId).get();
+      
+      if (doc.exists) {
+        final data = doc.data();
+        if (data != null) {
+          debugPrint("FirebaseService: Prescription found");
+          return PrescriptionModel.fromMap(data, doc.id);
+        } else {
+          debugPrint("FirebaseService: Prescription document exists but data is null");
+          return null;
+        }
+      } else {
+        debugPrint("FirebaseService: Prescription not found");
         return null;
       }
-      
-      return PrescriptionModel.fromMap(docSnapshot.data()!, docSnapshot.id);
     } catch (e) {
-      debugPrint('Error getting prescription by ID: $e');
+      debugPrint("FirebaseService: Error fetching prescription: $e");
       rethrow;
     }
   }
   
   Future<List<PrescriptionModel>> getPrescriptionsForPatient(String patientId) async {
     try {
+      debugPrint("FirebaseService: Fetching prescriptions for patient $patientId");
+      final prescriptionsCollection = 'prescriptions';
+      
       final querySnapshot = await _firestore
-          .collection('prescriptions')
+          .collection(prescriptionsCollection)
           .where('patientId', isEqualTo: patientId)
           .orderBy('issuedAt', descending: true)
           .get();
       
-      return querySnapshot.docs
+      final prescriptions = querySnapshot.docs
           .map((doc) => PrescriptionModel.fromMap(doc.data(), doc.id))
           .toList();
+      
+      debugPrint("FirebaseService: Found ${prescriptions.length} prescriptions for patient");
+      return prescriptions;
     } catch (e) {
-      debugPrint('Error getting prescriptions for patient: $e');
-      return [];
+      debugPrint("FirebaseService: Error fetching patient prescriptions: $e");
+      rethrow;
     }
   }
   
   Future<List<PrescriptionModel>> getPrescriptionsForDoctor(String doctorId) async {
     try {
+      debugPrint("FirebaseService: Fetching prescriptions written by doctor $doctorId");
+      final prescriptionsCollection = 'prescriptions';
+      
       final querySnapshot = await _firestore
-          .collection('prescriptions')
+          .collection(prescriptionsCollection)
           .where('doctorId', isEqualTo: doctorId)
           .orderBy('issuedAt', descending: true)
           .get();
       
-      return querySnapshot.docs
+      final prescriptions = querySnapshot.docs
           .map((doc) => PrescriptionModel.fromMap(doc.data(), doc.id))
           .toList();
+      
+      debugPrint("FirebaseService: Found ${prescriptions.length} prescriptions written by doctor");
+      return prescriptions;
     } catch (e) {
-      debugPrint('Error getting prescriptions for doctor: $e');
-      return [];
+      debugPrint("FirebaseService: Error fetching doctor prescriptions: $e");
+      rethrow;
     }
   }
   
   Future<List<PrescriptionModel>> getPrescriptionsForAppointment(String appointmentId) async {
     try {
+      debugPrint("FirebaseService: Fetching prescriptions for appointment $appointmentId");
+      final prescriptionsCollection = 'prescriptions';
+      
       final querySnapshot = await _firestore
-          .collection('prescriptions')
+          .collection(prescriptionsCollection)
           .where('appointmentId', isEqualTo: appointmentId)
           .orderBy('issuedAt', descending: true)
           .get();
       
-      return querySnapshot.docs
+      final prescriptions = querySnapshot.docs
           .map((doc) => PrescriptionModel.fromMap(doc.data(), doc.id))
           .toList();
+      
+      debugPrint("FirebaseService: Found ${prescriptions.length} prescriptions for appointment");
+      return prescriptions;
     } catch (e) {
-      debugPrint('Error getting prescriptions for appointment: $e');
-      return [];
+      debugPrint("FirebaseService: Error fetching appointment prescriptions: $e");
+      rethrow;
     }
   }
   
   Future<void> updatePrescription(PrescriptionModel prescription) async {
     try {
-      await _firestore
-          .collection('prescriptions')
-          .doc(prescription.id)
-          .update(prescription.toMap());
+      debugPrint("FirebaseService: Updating prescription with ID ${prescription.id}");
+      final prescriptionsCollection = 'prescriptions';
+      
+      // Ensure we update the timestamp
+      final updatedPrescription = prescription.copyWith(
+        updatedAt: Timestamp.now()
+      );
+      
+      final prescriptionMap = updatedPrescription.toMap();
+      await _firestore.collection(prescriptionsCollection).doc(prescription.id).update(prescriptionMap);
+      
+      debugPrint("FirebaseService: Prescription updated successfully");
     } catch (e) {
-      debugPrint('Error updating prescription: $e');
+      debugPrint("FirebaseService: Error updating prescription: $e");
+      rethrow;
+    }
+  }
+  
+  Future<void> markPrescriptionAsFilled(
+    String prescriptionId, 
+    {String? pharmacyId, String? pharmacyNotes}
+  ) async {
+    try {
+      debugPrint("FirebaseService: Marking prescription $prescriptionId as filled");
+      final prescriptionsCollection = 'prescriptions';
+      
+      final updateData = {
+        'isFilled': true,
+        'filledAt': Timestamp.now(),
+        'updatedAt': Timestamp.now(),
+      };
+      
+      if (pharmacyId != null) {
+        updateData['pharmacyId'] = pharmacyId;
+      }
+      
+      if (pharmacyNotes != null) {
+        updateData['pharmacyNotes'] = pharmacyNotes;
+      }
+      
+      await _firestore.collection(prescriptionsCollection).doc(prescriptionId).update(updateData);
+      
+      debugPrint("FirebaseService: Prescription marked as filled successfully");
+    } catch (e) {
+      debugPrint("FirebaseService: Error marking prescription as filled: $e");
+      rethrow;
+    }
+  }
+  
+  Future<bool> processPrescriptionRefill(String prescriptionId) async {
+    try {
+      debugPrint("FirebaseService: Processing refill for prescription $prescriptionId");
+      final prescriptionsCollection = 'prescriptions';
+      
+      // Run in a transaction to ensure data integrity
+      bool refillSuccessful = false;
+      
+      await _firestore.runTransaction((transaction) async {
+        final docRef = _firestore.collection(prescriptionsCollection).doc(prescriptionId);
+        final docSnapshot = await transaction.get(docRef);
+        
+        if (!docSnapshot.exists) {
+          debugPrint("FirebaseService: Prescription not found for refill");
+          return;
+        }
+        
+        final data = docSnapshot.data();
+        if (data == null) {
+          debugPrint("FirebaseService: Prescription data is null");
+          return;
+        }
+        
+        final isRefillable = data['isRefillable'] ?? false;
+        final refillsRemaining = data['refillsRemaining'] ?? 0;
+        
+        if (!isRefillable || refillsRemaining <= 0) {
+          debugPrint("FirebaseService: Prescription is not refillable or no refills remaining");
+          return;
+        }
+        
+        // Update refills remaining
+        transaction.update(docRef, {
+          'refillsRemaining': refillsRemaining - 1,
+          'updatedAt': Timestamp.now(),
+        });
+        
+        refillSuccessful = true;
+      });
+      
+      debugPrint("FirebaseService: Refill processed successfully: $refillSuccessful");
+      return refillSuccessful;
+    } catch (e) {
+      debugPrint("FirebaseService: Error processing prescription refill: $e");
       rethrow;
     }
   }
   
   Future<void> deletePrescription(String prescriptionId) async {
     try {
-      await _firestore
-          .collection('prescriptions')
-          .doc(prescriptionId)
-          .delete();
+      debugPrint("FirebaseService: Deleting prescription $prescriptionId");
+      final prescriptionsCollection = 'prescriptions';
+      
+      await _firestore.collection(prescriptionsCollection).doc(prescriptionId).delete();
+      
+      debugPrint("FirebaseService: Prescription deleted successfully");
     } catch (e) {
-      debugPrint('Error deleting prescription: $e');
+      debugPrint("FirebaseService: Error deleting prescription: $e");
       rethrow;
     }
   }
@@ -2027,5 +2145,676 @@ class FirebaseService {
     } catch (e) {
       debugPrint("FirebaseService: Error updating doctor rating: $e");
     }
+  }
+
+  // Method to create a chat between two users
+  Future<String> createChatBetweenUsers(String userId1, String userId2) async {
+    try {
+      debugPrint("FirebaseService: Creating chat between $userId1 and $userId2");
+      
+      // Check if a chat already exists between these users
+      final existingChatQuery = await _firestore.collection(_chatsCollection)
+          .where('participants', arrayContains: userId1)
+          .get();
+      
+      for (final doc in existingChatQuery.docs) {
+        final participants = List<String>.from(doc.data()['participants'] ?? []);
+        if (participants.contains(userId2)) {
+          debugPrint("FirebaseService: Chat already exists with ID ${doc.id}");
+          return doc.id;
+        }
+      }
+      
+      // No existing chat, create a new one
+      final chatId = _uuid.v4();
+      
+      // Get user details for both participants
+      final user1Doc = await _firestore.collection(_usersCollection).doc(userId1).get();
+      final user2Doc = await _firestore.collection(_usersCollection).doc(userId2).get();
+      
+      final participantDetails = <String, dynamic>{};
+      
+      if (user1Doc.exists) {
+        final userData = user1Doc.data() as Map<String, dynamic>?;
+        if (userData != null) {
+          participantDetails[userId1] = {
+            'name': userData['name'] ?? 'Unknown User',
+            'role': userData['role'] ?? 'user',
+            'profileImageUrl': userData['profileImageUrl'],
+          };
+        }
+      }
+      
+      if (user2Doc.exists) {
+        final userData = user2Doc.data() as Map<String, dynamic>?;
+        if (userData != null) {
+          participantDetails[userId2] = {
+            'name': userData['name'] ?? 'Unknown User',
+            'role': userData['role'] ?? 'user',
+            'profileImageUrl': userData['profileImageUrl'],
+          };
+        }
+      }
+      
+      // Create chat document
+      await _firestore.collection(_chatsCollection).doc(chatId).set({
+        'id': chatId,
+        'participants': [userId1, userId2],
+        'lastMessage': '',
+        'lastMessageTime': Timestamp.now(),
+        'unreadCount': 0,
+        'createdAt': Timestamp.now(),
+        'updatedAt': Timestamp.now(),
+        'participantDetails': participantDetails,
+      });
+      
+      debugPrint("FirebaseService: New chat created with ID $chatId");
+      return chatId;
+    } catch (e) {
+      debugPrint("FirebaseService: Error creating chat between users: $e");
+      rethrow;
+    }
+  }
+  
+  // Report operations
+  
+  // Create a new report
+  Future<String> createMedicalReport(ReportModel report) async {
+    try {
+      final reportId = _uuid.v4();
+      final reportWithId = report.copyWith(
+        id: reportId,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      );
+      
+      // Extract the map and ensure status is explicitly set as a string
+      final Map<String, dynamic> reportMap = reportWithId.toMap();
+      
+      // Double-check that status is set to 'draft' for new reports
+      if (report.status == ReportStatus.draft) {
+        reportMap['status'] = 'draft';
+      }
+      
+      debugPrint("FirebaseService: Creating medical report with ID $reportId and status: ${reportMap['status']}");
+      
+      // Ensure doctorId is valid
+      final doctorId = reportMap['doctorId'] as String;
+      debugPrint("FirebaseService: Report doctorId: $doctorId");
+      
+      // Check if doctor exists in Firestore
+      final doctorDoc = await _firestore.collection(_usersCollection).doc(doctorId).get();
+      if (!doctorDoc.exists) {
+        debugPrint("FirebaseService: Warning - Doctor with ID $doctorId does not exist in users collection");
+      } else {
+        debugPrint("FirebaseService: Verified doctor exists in database");
+      }
+      
+      // Store the report in Firestore
+      await _firestore.collection(_reportsCollection)
+          .doc(reportId)
+          .set(reportMap);
+      
+      // Verify the report was created with correct status
+      final verifyDoc = await _firestore.collection(_reportsCollection).doc(reportId).get();
+      if (verifyDoc.exists) {
+        final verifyData = verifyDoc.data();
+        debugPrint("FirebaseService: Verified report created with status: ${verifyData?['status']}");
+      }
+      
+      return reportId;
+    } catch (e) {
+      debugPrint("FirebaseService: Error creating medical report: $e");
+      rethrow;
+    }
+  }
+  
+  // Get reports for a doctor
+  Future<List<ReportModel>> getReportsForDoctor(String doctorId) async {
+    try {
+      debugPrint("FirebaseService: Getting reports for doctor $doctorId");
+      final snapshot = await _firestore.collection(_reportsCollection)
+          .where('doctorId', isEqualTo: doctorId)
+          .orderBy('createdAt', descending: true)
+          .get();
+      
+      final reports = snapshot.docs.map((doc) => 
+          ReportModel.fromMap(doc.data(), doc.id)).toList();
+      
+      debugPrint("FirebaseService: Found ${reports.length} reports for doctor");
+      return reports;
+    } catch (e) {
+      debugPrint("FirebaseService: Error getting reports for doctor: $e");
+      return [];
+    }
+  }
+  
+  // Get reports for a patient
+  Future<List<ReportModel>> getReportsForPatient(String patientId) async {
+    try {
+      final snapshot = await _firestore.collection(_reportsCollection)
+          .where('patientId', isEqualTo: patientId)
+          .orderBy('createdAt', descending: true)
+          .get();
+      
+      return snapshot.docs.map((doc) => 
+          ReportModel.fromMap(doc.data(), doc.id)).toList();
+    } catch (e) {
+      debugPrint("FirebaseService: Error getting reports for patient: $e");
+      return [];
+    }
+  }
+  
+  // Get a report by ID
+  Future<ReportModel?> getReportById(String reportId) async {
+    try {
+      final doc = await _firestore.collection(_reportsCollection)
+          .doc(reportId)
+          .get();
+      
+      if (doc.exists) {
+        return ReportModel.fromMap(doc.data()!, doc.id);
+      }
+      
+      return null;
+    } catch (e) {
+      debugPrint("FirebaseService: Error getting report by ID: $e");
+      return null;
+    }
+  }
+  
+  // Update a report
+  Future<void> updateReport(ReportModel report) async {
+    try {
+      final updatedReport = report.copyWith(
+        updatedAt: Timestamp.now(),
+      );
+      
+      await _firestore.collection(_reportsCollection)
+          .doc(report.id)
+          .update(updatedReport.toMap());
+      
+      debugPrint("FirebaseService: Updated report ${report.id}");
+    } catch (e) {
+      debugPrint("FirebaseService: Error updating report: $e");
+      rethrow;
+    }
+  }
+  
+  // Mark a report as reviewed
+  Future<void> reviewReport(String reportId, String correctedContent) async {
+    try {
+      await _firestore.collection(_reportsCollection)
+          .doc(reportId)
+          .update({
+            'correctedContent': correctedContent,
+            'status': 'reviewed',
+            'updatedAt': Timestamp.now(),
+          });
+      
+      debugPrint("FirebaseService: Marked report $reportId as reviewed");
+    } catch (e) {
+      debugPrint("FirebaseService: Error marking report as reviewed: $e");
+      rethrow;
+    }
+  }
+  
+  // Save a report to patient profile
+  Future<void> saveReportToPatientProfile(String reportId) async {
+    try {
+      await _firestore.collection(_reportsCollection)
+          .doc(reportId)
+          .update({
+            'isSavedToProfile': true,
+            'updatedAt': Timestamp.now(),
+          });
+      
+      debugPrint("FirebaseService: Saved report $reportId to patient profile");
+    } catch (e) {
+      debugPrint("FirebaseService: Error saving report to patient profile: $e");
+      rethrow;
+    }
+  }
+  
+  // Finalize a report and send to patient
+  Future<void> finalizeAndSendReport(String reportId, String? pdfUrl) async {
+    try {
+      await _firestore.collection(_reportsCollection)
+          .doc(reportId)
+          .update({
+            'status': 'finalized',
+            'isSentToPatient': true,
+            'pdfUrl': pdfUrl,
+            'updatedAt': Timestamp.now(),
+          });
+      
+      debugPrint("FirebaseService: Finalized and sent report $reportId to patient");
+    } catch (e) {
+      debugPrint("FirebaseService: Error finalizing and sending report: $e");
+      rethrow;
+    }
+  }
+  
+  // Get reports by status
+  Future<List<ReportModel>> getReportsByStatus(String doctorId, ReportStatus status) async {
+    try {
+      final statusString = ReportModel.statusToString(status);
+      
+      debugPrint("FirebaseService: Getting reports for doctor $doctorId with status '$statusString'");
+      
+      // First check if the doctor exists in users collection
+      final doctorDoc = await _firestore.collection(_usersCollection).doc(doctorId).get();
+      if (!doctorDoc.exists) {
+        debugPrint("FirebaseService: Warning - Doctor with ID $doctorId does not exist in users collection");
+      }
+      
+      // Query reports with the specific doctorId
+      var query = _firestore.collection(_reportsCollection)
+          .where('doctorId', isEqualTo: doctorId);
+      
+      // If looking for reports with a specific status, add status filter
+      if (status != null) {
+        query = query.where('status', isEqualTo: statusString);
+      }
+      
+      final snapshot = await query.orderBy('createdAt', descending: true).get();
+      
+      debugPrint("FirebaseService: Found ${snapshot.docs.length} documents for doctorId $doctorId with status '$statusString'");
+      
+      final reports = snapshot.docs.map((doc) {
+        final data = doc.data();
+        debugPrint("FirebaseService: Report ${doc.id} has status: ${data['status']} and doctorId: ${data['doctorId']}");
+        return ReportModel.fromMap(data, doc.id);
+      }).toList();
+      
+      debugPrint("FirebaseService: Found ${reports.length} reports for doctor with status '$statusString'");
+      
+      // If no reports found with the requested status but we're looking for drafts, check for reports without a status
+      if (reports.isEmpty && status == ReportStatus.draft) {
+        debugPrint("FirebaseService: Looking for reports without a status or with null status");
+        
+        // Query reports that might have missing status field but belong to this doctor
+        final allReportsQuery = _firestore.collection(_reportsCollection)
+            .where('doctorId', isEqualTo: doctorId);
+        final allReportsSnapshot = await allReportsQuery.get();
+        
+        // Filter reports without a status in the application code
+        final missingStatusReports = allReportsSnapshot.docs
+            .where((doc) => doc.data()['status'] == null || doc.data()['status'] == '')
+            .map((doc) {
+              debugPrint("FirebaseService: Found report ${doc.id} without status field");
+              final data = doc.data();
+              
+              // Add a status field with 'draft' value to ensure proper loading
+              data['status'] = 'draft';
+              
+              return ReportModel.fromMap(data, doc.id);
+            })
+            .toList();
+        
+        debugPrint("FirebaseService: Found ${missingStatusReports.length} reports without a status field");
+        reports.addAll(missingStatusReports);
+        
+        // Update these reports to have the proper status field in Firestore
+        for (final report in missingStatusReports) {
+          debugPrint("FirebaseService: Updating report ${report.id} to have 'draft' status");
+          await _firestore.collection(_reportsCollection)
+              .doc(report.id)
+              .update({'status': 'draft'});
+        }
+      }
+      
+      return reports;
+    } catch (e) {
+      debugPrint("FirebaseService: Error getting reports by status: $e");
+      return [];
+    }
+  }
+
+  // Get appointments for a patient
+  Future<List<AppointmentModel>> getAppointmentsForPatient(String patientId) async {
+    try {
+      debugPrint("FirebaseService: Getting ALL appointments for patient $patientId");
+      final snapshot = await _firestore.collection(_appointmentsCollection)
+          .where('patientId', isEqualTo: patientId)
+          // Removed any status filters to get ALL appointments
+          .orderBy('date', descending: true)
+          .get();
+      
+      final appointments = snapshot.docs
+          .map((doc) => AppointmentModel.fromMap(doc.data(), doc.id))
+          .toList();
+      
+      // Additional debug info
+      debugPrint("FirebaseService: Found ${appointments.length} total appointments for patient");
+      if (appointments.isNotEmpty) {
+        final doctorIds = appointments.map((app) => app.doctorId).toSet();
+        debugPrint("FirebaseService: Found appointments with ${doctorIds.length} unique doctors: ${doctorIds.join(', ')}");
+      }
+      
+      return appointments;
+    } catch (e) {
+      debugPrint("FirebaseService: Error getting appointments for patient: $e");
+      return [];
+    }
+  }
+
+  // Invitation operations
+  Future<String> createPatientInvitation(String doctorId, String patientEmail, String? message) async {
+    try {
+      debugPrint("FirebaseService: Creating invitation for $patientEmail");
+      final doctor = await getUserById(doctorId);
+      
+      if (doctor == null) {
+        throw Exception("Doctor not found");
+      }
+      
+      final invitationId = _uuid.v4();
+      final now = Timestamp.now();
+      final expiresAt = Timestamp.fromDate(
+        DateTime.now().add(const Duration(days: 7))
+      );
+      
+      // Get doctor details to include in the invitation
+      final doctorDetails = await _getDoctorDetailsForAppointment(doctorId);
+      
+      final invitation = InvitationModel(
+        id: invitationId,
+        doctorId: doctorId,
+        doctorName: doctor.name,
+        patientEmail: patientEmail,
+        status: 'pending',
+        message: message,
+        createdAt: now,
+        expiresAt: expiresAt,
+        doctorDetails: doctorDetails,
+      );
+      
+      await _firestore.collection(_invitationsCollection).doc(invitationId).set(invitation.toMap());
+      
+      debugPrint("FirebaseService: Invitation created successfully with ID: $invitationId");
+      return invitationId;
+    } catch (e) {
+      debugPrint("FirebaseService: Error creating invitation: $e");
+      rethrow;
+    }
+  }
+  
+  Future<List<InvitationModel>> getPendingInvitationsForPatient(String email) async {
+    try {
+      debugPrint("FirebaseService: Getting pending invitations for $email");
+      final snapshot = await _firestore
+          .collection(_invitationsCollection)
+          .where('patientEmail', isEqualTo: email)
+          .where('status', isEqualTo: 'pending')
+          .where('expiresAt', isGreaterThan: Timestamp.now())
+          .get();
+      
+      final invitations = snapshot.docs
+          .map((doc) => InvitationModel.fromMap(doc.data(), doc.id))
+          .toList();
+          
+      debugPrint("FirebaseService: Found ${invitations.length} pending invitations");
+      return invitations;
+    } catch (e) {
+      debugPrint("FirebaseService: Error getting pending invitations: $e");
+      return [];
+    }
+  }
+  
+  Future<void> updateInvitationStatus(String invitationId, String status, {String? patientId}) async {
+    try {
+      debugPrint("FirebaseService: Updating invitation $invitationId to status $status");
+      final Map<String, dynamic> updateData = {
+        'status': status,
+      };
+      
+      if (status == 'accepted' && patientId != null) {
+        updateData['acceptedAt'] = Timestamp.now();
+        updateData['patientId'] = patientId;
+      }
+      
+      await _firestore
+          .collection(_invitationsCollection)
+          .doc(invitationId)
+          .update(updateData);
+          
+      debugPrint("FirebaseService: Invitation updated successfully");
+    } catch (e) {
+      debugPrint("FirebaseService: Error updating invitation: $e");
+      rethrow;
+    }
+  }
+  
+  Future<List<InvitationModel>> getSentInvitationsForDoctor(String doctorId) async {
+    try {
+      debugPrint("FirebaseService: Getting sent invitations for doctor $doctorId");
+      final snapshot = await _firestore
+          .collection(_invitationsCollection)
+          .where('doctorId', isEqualTo: doctorId)
+          .orderBy('createdAt', descending: true)
+          .get();
+      
+      final invitations = snapshot.docs
+          .map((doc) => InvitationModel.fromMap(doc.data(), doc.id))
+          .toList();
+          
+      debugPrint("FirebaseService: Found ${invitations.length} sent invitations");
+      return invitations;
+    } catch (e) {
+      debugPrint("FirebaseService: Error getting sent invitations: $e");
+      return [];
+    }
+  }
+  
+  Future<void> deleteInvitation(String invitationId) async {
+    try {
+      debugPrint("FirebaseService: Deleting invitation $invitationId");
+      await _firestore
+          .collection(_invitationsCollection)
+          .doc(invitationId)
+          .delete();
+          
+      debugPrint("FirebaseService: Invitation deleted successfully");
+    } catch (e) {
+      debugPrint("FirebaseService: Error deleting invitation: $e");
+      rethrow;
+    }
+  }
+  
+  // Referral Code Operations
+  
+  // Generate a random referral code for a doctor
+  Future<ReferralCodeModel> generateReferralCode(String doctorId) async {
+    try {
+      debugPrint("FirebaseService: Generating referral code for doctor $doctorId");
+      
+      // Get doctor details
+      final doctor = await getUserById(doctorId);
+      if (doctor == null) {
+        throw Exception("Doctor not found");
+      }
+      
+      // Generate a random 8-character code
+      final code = _generateRandomCode(8);
+      final now = Timestamp.now();
+      
+      // Create expiration date (30 days from now)
+      final expiresAt = Timestamp.fromDate(
+        DateTime.now().add(const Duration(days: 30))
+      );
+      
+      // Create referral code document
+      final referralId = _uuid.v4();
+      final referralCode = ReferralCodeModel(
+        id: referralId,
+        code: code,
+        doctorId: doctorId,
+        doctorName: doctor.name,
+        isUsed: false,
+        createdAt: now,
+        expiresAt: expiresAt,
+      );
+      
+      // Save to Firestore
+      await _firestore.collection(_referralCodesCollection)
+          .doc(referralId)
+          .set(referralCode.toMap());
+      
+      debugPrint("FirebaseService: Referral code generated: $code");
+      return referralCode;
+    } catch (e) {
+      debugPrint("FirebaseService: Error generating referral code: $e");
+      rethrow;
+    }
+  }
+
+  // Validate a referral code entered by a patient
+  Future<ReferralCodeModel?> validateReferralCode(String code) async {
+    try {
+      debugPrint("FirebaseService: Validating referral code: $code");
+      
+      // Query Firestore for the code
+      final snapshot = await _firestore.collection(_referralCodesCollection)
+          .where('code', isEqualTo: code)
+          .limit(1)
+          .get();
+      
+      if (snapshot.docs.isEmpty) {
+        debugPrint("FirebaseService: Referral code not found");
+        return null;
+      }
+      
+      final referralCode = ReferralCodeModel.fromMap(
+        snapshot.docs.first.data(), 
+        snapshot.docs.first.id
+      );
+      
+      // Check if code is already used
+      if (referralCode.isUsed) {
+        debugPrint("FirebaseService: Referral code already used");
+        return null;
+      }
+      
+      // Check if code is expired
+      if (referralCode.isExpired()) {
+        debugPrint("FirebaseService: Referral code expired");
+        return null;
+      }
+      
+      debugPrint("FirebaseService: Referral code valid");
+      return referralCode;
+    } catch (e) {
+      debugPrint("FirebaseService: Error validating referral code: $e");
+      return null;
+    }
+  }
+
+  // Mark a referral code as used by a patient
+  Future<bool> useReferralCode(String referralId, String patientId, String patientName) async {
+    try {
+      debugPrint("FirebaseService: Using referral code $referralId for patient $patientId");
+      
+      // Update the referral code document
+      await _firestore.collection(_referralCodesCollection)
+          .doc(referralId)
+          .update({
+            'isUsed': true,
+            'usedByPatientId': patientId,
+            'usedByPatientName': patientName,
+            'usedAt': Timestamp.now(),
+          });
+      
+      // Add relation between doctor and patient
+      final referralDoc = await _firestore.collection(_referralCodesCollection).doc(referralId).get();
+      if (referralDoc.exists) {
+        final data = referralDoc.data()!;
+        final doctorId = data['doctorId'] as String;
+        
+        // Add this patient to the doctor's referral list
+        await _firestore.collection(_usersCollection)
+            .doc(doctorId)
+            .collection('referredPatients')
+            .doc(patientId)
+            .set({
+              'patientId': patientId,
+              'patientName': patientName,
+              'referralCode': data['code'],
+              'referredAt': Timestamp.now(),
+            });
+        
+        // Also add the doctor to patient's doctor list to establish connection
+        await _firestore.collection(_usersCollection)
+            .doc(patientId)
+            .collection('doctors')
+            .doc(doctorId)
+            .set({
+              'doctorId': doctorId,
+              'doctorName': data['doctorName'],
+              'referralCode': data['code'],
+              'referredAt': Timestamp.now(),
+            });
+      }
+      
+      debugPrint("FirebaseService: Referral code used successfully");
+      return true;
+    } catch (e) {
+      debugPrint("FirebaseService: Error using referral code: $e");
+      return false;
+    }
+  }
+
+  // Get all referral codes for a doctor
+  Future<List<ReferralCodeModel>> getDoctorReferralCodes(String doctorId) async {
+    try {
+      debugPrint("FirebaseService: Getting referral codes for doctor $doctorId");
+      
+      final snapshot = await _firestore.collection(_referralCodesCollection)
+          .where('doctorId', isEqualTo: doctorId)
+          .orderBy('createdAt', descending: true)
+          .get();
+      
+      final codes = snapshot.docs.map((doc) => 
+          ReferralCodeModel.fromMap(doc.data(), doc.id)).toList();
+      
+      debugPrint("FirebaseService: Found ${codes.length} referral codes");
+      return codes;
+    } catch (e) {
+      debugPrint("FirebaseService: Error getting referral codes: $e");
+      return [];
+    }
+  }
+
+  // Get all patients who used a doctor's referral codes
+  Future<List<Map<String, dynamic>>> getReferredPatients(String doctorId) async {
+    try {
+      debugPrint("FirebaseService: Getting referred patients for doctor $doctorId");
+      
+      final snapshot = await _firestore.collection(_usersCollection)
+          .doc(doctorId)
+          .collection('referredPatients')
+          .orderBy('referredAt', descending: true)
+          .get();
+      
+      final patients = snapshot.docs.map((doc) => doc.data()).toList();
+      
+      debugPrint("FirebaseService: Found ${patients.length} referred patients");
+      return patients;
+    } catch (e) {
+      debugPrint("FirebaseService: Error getting referred patients: $e");
+      return [];
+    }
+  }
+
+  // Helper method to generate a random alphanumeric code
+  String _generateRandomCode(int length) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    final random = Random.secure();
+    return String.fromCharCodes(
+      Iterable.generate(
+        length, 
+        (_) => chars.codeUnitAt(random.nextInt(chars.length))
+      )
+    );
   }
 } 

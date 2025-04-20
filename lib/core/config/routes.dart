@@ -10,11 +10,15 @@ import 'package:medi_connect/presentation/pages/patient/book_appointment_page.da
 import 'package:medi_connect/presentation/pages/doctor/doctor_dashboard_page.dart';
 import 'package:medi_connect/presentation/pages/doctor/doctor_profile_page.dart';
 import 'package:medi_connect/presentation/pages/doctor/patient_detail_page.dart';
+import 'package:medi_connect/presentation/pages/doctor/report_review_page.dart';
+import 'package:medi_connect/presentation/pages/doctor/report_details_page.dart';
 import 'package:medi_connect/presentation/pages/patient/find_doctor_page.dart';
 import 'package:medi_connect/presentation/pages/chat/chat_page.dart';
 import 'package:medi_connect/core/widgets/health_icon_showcase.dart';
 import 'package:medi_connect/presentation/pages/appointment/appointment_details_page.dart';
 import 'package:medi_connect/presentation/pages/documents/medical_documents_page.dart';
+import 'package:medi_connect/presentation/pages/doctor/invite_patient_page.dart';
+import 'package:medi_connect/presentation/pages/patient/view_invitations_page.dart';
 
 // Route names as constants
 class Routes {
@@ -35,6 +39,10 @@ class Routes {
   static const String healthIcons = '/health-icons';
   static const String appointmentDetails = '/appointment/:id';
   static const String medicalDocuments = '/documents';
+  static const String reportDetails = '/reports/:id';
+  static const String reviewReport = '/reports/:id/review';
+  static const String invitePatient = '/doctor/invite-patient';
+  static const String viewInvitations = '/patient/invitations';
 }
 
 // GoRouter could be used for more complex routing, but for simplicity
@@ -85,8 +93,11 @@ class AppRouter {
         );
         
       case Routes.bookAppointment:
+        // Extract the doctorId from the route arguments
+        final Map<String, dynamic>? args = settings.arguments as Map<String, dynamic>?;
+        final String doctorId = args?['doctorId'] ?? '';
         return MaterialPageRoute(
-          builder: (_) => const BookAppointmentPage(),
+          builder: (_) => BookAppointmentPage(doctorId: doctorId),
           settings: settings,
         );
         
@@ -126,6 +137,18 @@ class AppRouter {
           settings: settings,
         );
         
+      case Routes.invitePatient:
+        return MaterialPageRoute(
+          builder: (_) => const InvitePatientPage(),
+          settings: settings,
+        );
+        
+      case Routes.viewInvitations:
+        return MaterialPageRoute(
+          builder: (_) => const ViewInvitationsPage(),
+          settings: settings,
+        );
+        
       // Dynamic route with parameter
       default:
         if (settings.name?.startsWith('${Routes.patientDetail.split('/:')[0]}/') ?? false) {
@@ -148,6 +171,26 @@ class AppRouter {
           final appointmentId = settings.name?.split('/').last;
           return MaterialPageRoute(
             builder: (_) => AppointmentDetailsPage(appointmentId: appointmentId ?? ''),
+            settings: settings,
+          );
+        }
+
+        // Report related routes
+        if (settings.name?.startsWith('${Routes.reportDetails.split('/:')[0]}/') ?? false) {
+          final reportId = settings.name?.split('/').last;
+          return MaterialPageRoute(
+            builder: (_) => ReportDetailsPage(reportId: reportId ?? ''),
+            settings: settings,
+          );
+        }
+
+        final routeName = settings.name;
+        if (routeName != null && 
+            routeName.startsWith('${Routes.reviewReport.split('/:')[0]}/') && 
+            routeName.contains('/review')) {
+          final reportId = settings.name?.split('/')[2]; // Extract ID from /reports/:id/review
+          return MaterialPageRoute(
+            builder: (_) => ReportReviewPage(reportId: reportId ?? ''),
             settings: settings,
           );
         }

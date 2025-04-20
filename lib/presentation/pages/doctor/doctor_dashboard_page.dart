@@ -4,13 +4,18 @@ import 'package:medi_connect/core/constants/app_colors.dart';
 import 'package:medi_connect/core/constants/app_typography.dart';
 import 'package:medi_connect/core/models/appointment_model.dart';
 import 'package:medi_connect/core/models/user_model.dart';
+import 'package:medi_connect/core/models/chat_model.dart';
+import 'package:medi_connect/core/models/report_model.dart';
 import 'package:medi_connect/core/services/firebase_service.dart';
 import 'package:medi_connect/core/services/auth_service.dart';
 import 'package:medi_connect/presentation/widgets/gradient_button.dart';
 import 'package:medi_connect/presentation/pages/doctor/doctor_schedule_page.dart';
+import 'package:medi_connect/presentation/pages/doctor/referral_code_page.dart';
+import 'package:medi_connect/presentation/pages/doctor/referred_patients_page.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 
 // Provider for current doctor
 final currentDoctorProvider = FutureProvider<UserModel?>((ref) async {
@@ -29,29 +34,133 @@ final doctorAppointmentsProvider = FutureProvider.family<List<AppointmentModel>,
   return await firebaseService.getAppointmentsForDoctor(doctorId);
 });
 
+// Add at the top near other providers
+final selectedTabProvider = StateProvider<int>((ref) => 0);
+
 class DoctorDashboardPage extends ConsumerStatefulWidget {
-  const DoctorDashboardPage({super.key});
+  final int initialTab;
+  
+  const DoctorDashboardPage({
+    super.key,
+    this.initialTab = 0,
+  });
 
   @override
   ConsumerState<DoctorDashboardPage> createState() => _DoctorDashboardPageState();
 }
 
-class _DoctorDashboardPageState extends ConsumerState<DoctorDashboardPage> {
-  int _currentIndex = 0;
+class _DoctorDashboardPageState extends ConsumerState<DoctorDashboardPage> with SingleTickerProviderStateMixin {
   UserModel? _doctor;
-  bool _isProfileComplete = false;
   bool _isLoading = true;
-  List<Widget> _tabs = [
-    const Center(child: Text('Home')),
-    const Center(child: Text('Appointments')),
-    const Center(child: Text('Messages')),
-    const Center(child: Text('Profile')),
-  ];
+  bool _isProfileComplete = false;
+  int _currentIndex = 0;
+  late List<Widget> _tabs;
+  List<Map<String, dynamic>> _analytics = [];
+  
+  // Add animation controller for bottom nav bar
+  late AnimationController _animationController;
+  
+  // Controller for bottom navigation
+  final _navigatorKey = GlobalKey<ScaffoldState>();
   
   @override
   void initState() {
     super.initState();
-    _loadDoctorData();
+    // Initialize animation controller
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    
+    _tabs = [
+      const Center(child: CircularProgressIndicator()),
+      const Center(child: CircularProgressIndicator()),
+      const Center(child: CircularProgressIndicator()),
+      const Center(child: CircularProgressIndicator()),
+      const Center(child: CircularProgressIndicator()),
+    ];
+    
+    // Initialize current index from widget if provided
+    _currentIndex = widget.initialTab;
+    
+    // Listen to tab change requests
+    ref.listenManual(selectedTabProvider, (previous, next) {
+      if (next != _currentIndex) {
+        setState(() {
+          _currentIndex = next;
+        });
+      }
+    });
+    
+    _loadDashboardData();
+    _initializeAnalytics();
+  }
+  
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+  
+  // Add this method
+  Future<void> _loadDashboardData() async {
+    setState(() {
+      _isLoading = true;
+    });
+    
+    try {
+      await _loadDoctorData();
+      // Additional dashboard data loading can be added here
+    } catch (e) {
+      debugPrint('Error loading dashboard data: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+  
+  // Initialize analytics with default values for new doctors
+  void _initializeAnalytics() {
+    _analytics = [
+      {
+        'title': 'Total Patients',
+        'value': 0,
+        'icon': Icons.people_alt_rounded,
+        'color': const Color(0xFF5BBFB2),
+        'isIncrease': true,
+        'change': '0%',
+      },
+      {
+        'title': 'Appointments',
+        'value': 0,
+        'unit': '',
+        'icon': Icons.calendar_today_rounded,
+        'color': const Color(0xFF6C7FDF),
+        'isIncrease': true,
+        'change': '0%',
+      },
+      {
+        'title': 'Completion Rate',
+        'value': '0',
+        'unit': '%',
+        'icon': Icons.check_circle_outline_rounded,
+        'color': const Color(0xFFFFA952),
+        'isIncrease': true,
+        'change': '0%',
+      },
+      {
+        'title': 'Average Rating',
+        'value': '0.0',
+        'unit': '',
+        'icon': Icons.star_rounded,
+        'color': const Color(0xFFFF7272),
+        'isIncrease': true,
+        'change': '0%',
+      },
+    ];
   }
   
   Future<void> _loadDoctorData() async {
@@ -82,6 +191,7 @@ class _DoctorDashboardPageState extends ConsumerState<DoctorDashboardPage> {
             DoctorHomeTab(doctor: doctor),
             DoctorAppointmentsTab(doctor: doctor),
             DoctorMessagesTab(doctor: doctor),
+            DoctorReportsTab(doctor: doctor),
             DoctorProfileTab(doctor: doctor),
           ];
         }
@@ -183,90 +293,111 @@ class _DoctorDashboardPageState extends ConsumerState<DoctorDashboardPage> {
         ),
         bottomNavigationBar: _doctor == null || !_isProfileComplete
             ? null
-            : Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 16,
-                      offset: const Offset(0, -4),
-                    ),
-                  ],
-                ),
-                child: SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 12, bottom: 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _buildNavItem(0, Icons.home_rounded, 'Home'),
-                        _buildNavItem(1, Icons.calendar_month_rounded, 'Appointments'),
-                        _buildNavItem(2, Icons.chat_rounded, 'Messages'),
-                        _buildNavItem(3, Icons.person_rounded, 'Profile'),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+            : _buildCustomBottomNavigationBar(),
       ),
     );
   }
 
-  Widget _buildNavItem(int index, IconData icon, String label) {
-    final isSelected = _currentIndex == index;
-    
-    return InkWell(
-      onTap: () => _switchTab(index),
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary.withOpacity(0.1) : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+  Widget _buildCustomBottomNavigationBar() {
+    return Container(
+      height: 60,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -5),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            Icon(
-              icon,
-              color: isSelected ? AppColors.primary : AppColors.textTertiary,
-              size: 24,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: AppTypography.bodySmall.copyWith(
-                color: isSelected ? AppColors.primary : AppColors.textTertiary,
-                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-              ),
-            ),
+            _buildNavItem(0, Icons.dashboard_outlined, Icons.dashboard),
+            _buildNavItem(1, Icons.calendar_month_outlined, Icons.calendar_month),
+            _buildNavItem(2, Icons.chat_outlined, Icons.chat),
+            _buildNavItem(3, Icons.description_outlined, Icons.description),
+            _buildNavItem(4, Icons.person_outline, Icons.person),
           ],
         ),
       ),
     );
   }
 
-  void _switchTab(int index) {
-    setState(() {
-      _currentIndex = index;
-      switch (index) {
-        case 0:
-          _tabs[0] = DoctorHomeTab(doctor: _doctor!);
-          break;
-        case 1:
-          _tabs[1] = DoctorAppointmentsTab(doctor: _doctor!);
-          break;
-        case 2:
-          _tabs[2] = DoctorMessagesTab(doctor: _doctor!);
-          break;
-        case 3:
-          _tabs[3] = DoctorProfileTab(doctor: _doctor!);
-          break;
-      }
-    });
+  Widget _buildNavItem(int index, IconData icon, IconData activeIcon) {
+    final isSelected = _currentIndex == index;
+    
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _currentIndex = index;
+          _animationController.reset();
+          _animationController.forward();
+          // Update the tab content
+          switch (index) {
+            case 0:
+              _tabs[0] = DoctorHomeTab(doctor: _doctor!);
+              break;
+            case 1:
+              _tabs[1] = DoctorAppointmentsTab(doctor: _doctor!);
+              break;
+            case 2:
+              _tabs[2] = DoctorMessagesTab(doctor: _doctor!);
+              break;
+            case 3:
+              _tabs[3] = DoctorReportsTab(doctor: _doctor!);
+              break;
+            case 4:
+              _tabs[4] = DoctorProfileTab(doctor: _doctor!);
+              break;
+          }
+        });
+      },
+      customBorder: const CircleBorder(),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        width: 50,
+        height: 50,
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.primary.withOpacity(0.1) : Colors.transparent,
+          borderRadius: BorderRadius.circular(25),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              isSelected ? activeIcon : icon,
+              color: isSelected ? AppColors.primary : AppColors.textTertiary,
+              size: 24,
+            ),
+            if (isSelected)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: AnimatedBuilder(
+                  animation: _animationController,
+                  builder: (context, child) {
+                    return Container(
+                      width: 16 + 8 * _animationController.value,
+                      height: 3,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: AppColors.primaryGradient,
+                        ),
+                        borderRadius: BorderRadius.circular(1.5),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
-  
+
   String _getTabTitle() {
     switch (_currentIndex) {
       case 0:
@@ -276,6 +407,8 @@ class _DoctorDashboardPageState extends ConsumerState<DoctorDashboardPage> {
       case 2:
         return 'Messages';
       case 3:
+        return 'Reports';
+      case 4:
         return 'Profile';
       default:
         return 'Doctor Dashboard';
@@ -291,6 +424,8 @@ class _DoctorDashboardPageState extends ConsumerState<DoctorDashboardPage> {
       case 2:
         return DoctorMessagesTab(doctor: doctor);
       case 3:
+        return DoctorReportsTab(doctor: doctor);
+      case 4:
         return DoctorProfileTab(doctor: doctor);
       default:
         return DoctorHomeTab(doctor: doctor);
@@ -449,39 +584,47 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
       final pastAppointments = await firebaseService.getPastAppointments(widget.doctor.id, true);
       final cancelledAppointments = await firebaseService.getCancelledAppointments(widget.doctor.id, true);
       
+      // Calculate analytics metrics or use default values for new doctors
+      final totalAppointments = appointments.length + pastAppointments.length + cancelledAppointments.length;
+      final completedAppointments = pastAppointments.length;
+      final completionRate = totalAppointments > 0 ? (completedAppointments / totalAppointments * 100).toStringAsFixed(0) : '0';
+      
+      // Set analytics data
       _analytics = [
         {
-          'title': 'Patients Seen',
-          'value': pastAppointments.length,
-          'change': 8,
+          'title': 'Total Patients',
+          'value': _calculateUniquePatients(appointments, pastAppointments, cancelledAppointments),
+          'icon': Icons.people_alt_rounded,
+          'color': const Color(0xFF5BBFB2),
           'isIncrease': true,
-          'icon': Icons.people_outline,
-          'color': AppColors.primary,
+          'change': '0%',
         },
         {
-          'title': 'Avg. Session',
-          'value': 24,
-          'unit': 'min',
-          'change': 2,
+          'title': 'Appointments',
+          'value': totalAppointments,
+          'unit': '',
+          'icon': Icons.calendar_today_rounded,
+          'color': const Color(0xFF6C7FDF),
           'isIncrease': true,
-          'icon': Icons.timer_outlined,
-          'color': AppColors.secondary,
+          'change': '0%',
         },
         {
-          'title': 'Upcoming',
-          'value': appointments.length,
-          'change': 3,
+          'title': 'Completion Rate',
+          'value': completionRate,
+          'unit': '%',
+          'icon': Icons.check_circle_outline_rounded,
+          'color': const Color(0xFFFFA952),
           'isIncrease': true,
-          'icon': Icons.calendar_today,
-          'color': AppColors.accent,
+          'change': '0%',
         },
         {
-          'title': 'Cancelled',
-          'value': cancelledAppointments.length,
-          'change': 1,
-          'isIncrease': false,
-          'icon': Icons.cancel_outlined,
-          'color': AppColors.error,
+          'title': 'Average Rating',
+          'value': '0.0',
+          'unit': '',
+          'icon': Icons.star_rounded,
+          'color': const Color(0xFFFF7272),
+          'isIncrease': true,
+          'change': '0%',
         },
       ];
       
@@ -494,6 +637,22 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
         _isLoading = false;
       });
     }
+  }
+  
+  // Helper method to calculate unique patients
+  int _calculateUniquePatients(List<AppointmentModel> upcoming, List<AppointmentModel> past, List<AppointmentModel> cancelled) {
+    // Combine all appointments
+    final allAppointments = [...upcoming, ...past, ...cancelled];
+    
+    // Extract unique patient IDs
+    final patientIds = <String>{};
+    for (final appointment in allAppointments) {
+      if (appointment.patientId.isNotEmpty) {
+        patientIds.add(appointment.patientId);
+      }
+    }
+    
+    return patientIds.length;
   }
 
   // Helper function to parse time string for sorting
@@ -548,8 +707,12 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
                   ),
                   TextButton(
                     onPressed: () {
-                      // Switch to appointments tab
-                      ref.read(doctorAppointmentsProvider(widget.doctor.id));
+                      // Navigate directly to the appointments tab
+                      Navigator.of(context).pushReplacement(
+                        MaterialPageRoute(
+                          builder: (context) => const DoctorDashboardPage(initialTab: 1),
+                        ),
+                      );
                     },
                     child: const Text('View All'),
                   ),
@@ -733,6 +896,47 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
   }
 
   Widget _buildAnalyticsGrid() {
+    // Create default analytics data for new doctors
+    if (_analytics.isEmpty) {
+      _analytics = [
+        {
+          'title': 'Total Patients',
+          'value': 0,
+          'icon': Icons.people_alt_rounded,
+          'color': const Color(0xFF5BBFB2),
+          'isIncrease': true,
+          'change': '0%',
+        },
+        {
+          'title': 'Appointments',
+          'value': 0,
+          'unit': '',
+          'icon': Icons.calendar_today_rounded,
+          'color': const Color(0xFF6C7FDF),
+          'isIncrease': true,
+          'change': '0%',
+        },
+        {
+          'title': 'Completion Rate',
+          'value': '0',
+          'unit': '%',
+          'icon': Icons.check_circle_outline_rounded,
+          'color': const Color(0xFFFFA952),
+          'isIncrease': true,
+          'change': '0%',
+        },
+        {
+          'title': 'Average Rating',
+          'value': '0.0',
+          'unit': '',
+          'icon': Icons.star_rounded,
+          'color': const Color(0xFFFF7272),
+          'isIncrease': true,
+          'change': '0%',
+        },
+      ];
+    }
+
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -887,6 +1091,13 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
   
   // Build appointment card for home tab
   Widget _buildAppointmentCard(AppointmentModel appointment) {
+    // Parse time for better display
+    final timeRange = appointment.time;
+    final startTime = timeRange.split(' - ')[0];
+    final appointmentDate = appointment.date.toDate();
+    final isToday = DateUtils.isSameDay(appointmentDate, DateTime.now());
+    final dateStr = isToday ? 'Today' : DateFormat('MMM d, yyyy').format(appointmentDate);
+    
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
@@ -911,31 +1122,53 @@ class _DoctorHomeTabState extends ConsumerState<DoctorHomeTab> {
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              // Time indicator
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [AppColors.primary, AppColors.primaryDark],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.primary.withOpacity(0.2),
-                      blurRadius: 6,
-                      offset: const Offset(0, 2),
+              // Date and time indicator
+              Column(
+                mainAxisAlignment: MainAxisAlignment.start,
+                children: [
+                  // Date indicator
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isToday ? AppColors.error.withOpacity(0.9) : AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                  ],
-                ),
-                child: Text(
-                  appointment.time.split(' - ')[0],
-                  style: AppTypography.bodySmall.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
+                    child: Text(
+                      dateStr,
+                      style: AppTypography.bodySmall.copyWith(
+                        color: isToday ? Colors.white : AppColors.textSecondary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 8),
+                  // Time indicator
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [AppColors.primary, AppColors.primaryDark],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primary.withOpacity(0.2),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      appointment.time.split(' - ')[0],
+                      style: AppTypography.bodySmall.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(width: 16),
               
@@ -2252,28 +2485,34 @@ class _DoctorMessagesTabState extends ConsumerState<DoctorMessagesTab> {
 }
 
 // Doctor Profile Tab
-class DoctorProfileTab extends ConsumerWidget {
+class DoctorProfileTab extends StatelessWidget {
   final UserModel doctor;
-
-  const DoctorProfileTab({super.key, required this.doctor});
-
+  
+  const DoctorProfileTab({
+    Key? key,
+    required this.doctor,
+  }) : super(key: key);
+  
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildProfileHeader(),
-          const SizedBox(height: 24),
-          _buildProfileInfo(),
-          const SizedBox(height: 24),
-          _buildSettingsSection(context),
-        ],
+      physics: const BouncingScrollPhysics(),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildProfileHeader(),
+            const SizedBox(height: 20),
+            _buildProfileInfo(),
+            const SizedBox(height: 20),
+            _buildSettingsSection(context),
+          ],
+        ),
       ),
     );
   }
-
+  
   Widget _buildProfileHeader() {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -2349,16 +2588,16 @@ class DoctorProfileTab extends ConsumerWidget {
             children: [
               _buildStat('Experience', '${doctor.doctorInfo?['yearsExperience'] ?? 0} yrs'),
               _buildStatDivider(),
-              _buildStat('Patients', '120+'),
+              _buildStat('Patients', '${doctor.doctorInfo?['appointmentCount'] ?? 0}'),
               _buildStatDivider(),
-              _buildStat('Rating', '4.9'),
+              _buildStat('Rating', '${(doctor.doctorInfo?['rating'] ?? 0.0).toStringAsFixed(1)}'),
             ],
           ),
         ],
       ),
     );
   }
-
+  
   Widget _buildStatDivider() {
     return Container(
       height: 40,
@@ -2367,7 +2606,7 @@ class DoctorProfileTab extends ConsumerWidget {
       color: Colors.white.withOpacity(0.2),
     );
   }
-
+  
   Widget _buildStat(String title, String value) {
     return Column(
       children: [
@@ -2388,7 +2627,7 @@ class DoctorProfileTab extends ConsumerWidget {
       ],
     );
   }
-
+  
   Widget _buildProfileInfo() {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -2448,7 +2687,7 @@ class DoctorProfileTab extends ConsumerWidget {
       ),
     );
   }
-
+  
   Widget _buildInfoRow({
     required IconData icon,
     required String title,
@@ -2499,17 +2738,18 @@ class DoctorProfileTab extends ConsumerWidget {
       ),
     );
   }
-
+  
   Widget _buildSettingsSection(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 12,
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            spreadRadius: 0,
             offset: const Offset(0, 4),
           ),
         ],
@@ -2520,13 +2760,37 @@ class DoctorProfileTab extends ConsumerWidget {
           Text(
             'Settings',
             style: AppTypography.titleLarge.copyWith(
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 16),
           _buildSettingsItem(
-            icon: Icons.event_available,
-            title: 'Manage Availability',
+            icon: Icons.qr_code,
+            title: 'Referral Codes',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => DoctorReferralCodePage(doctor: doctor),
+                ),
+              );
+            },
+          ),
+          _buildSettingsItem(
+            icon: Icons.people,
+            title: 'Referred Patients',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ReferredPatientsPage(doctor: doctor),
+                ),
+              );
+            },
+          ),
+          _buildSettingsItem(
+            icon: Icons.schedule,
+            title: 'Schedule Management',
             onTap: () {
               Navigator.push(
                 context,
@@ -2540,40 +2804,40 @@ class DoctorProfileTab extends ConsumerWidget {
             icon: Icons.notifications_outlined,
             title: 'Notifications',
             onTap: () {
-              // Navigate to notifications settings
+              // TODO: Implement notification settings
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Coming soon!')),
+              );
             },
           ),
           _buildSettingsItem(
             icon: Icons.lock_outline,
             title: 'Privacy & Security',
             onTap: () {
-              // Navigate to privacy settings
+              // TODO: Implement privacy settings
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Coming soon!')),
+              );
             },
           ),
           _buildSettingsItem(
             icon: Icons.help_outline,
             title: 'Help & Support',
             onTap: () {
-              // Navigate to help & support
+              // TODO: Implement help & support
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Coming soon!')),
+              );
             },
           ),
-          _buildSettingsItem(
-            icon: Icons.info_outline,
-            title: 'About',
-            onTap: () {
-              // Navigate to about page
-            },
-          ),
+          const SizedBox(height: 16),
+          const Divider(),
+          const SizedBox(height: 16),
           _buildSettingsItem(
             icon: Icons.logout,
             title: 'Sign Out',
-            textColor: AppColors.error,
-            onTap: () async {
-              // Sign out
-              await AuthService().signOut();
-              if (context.mounted) {
-                Navigator.of(context).pushReplacementNamed(Routes.login);
-              }
+            onTap: () {
+              _showLogoutConfirmation(context);
             },
           ),
         ],
@@ -2581,10 +2845,131 @@ class DoctorProfileTab extends ConsumerWidget {
     );
   }
 
+  void _showLogoutConfirmation(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        contentPadding: EdgeInsets.zero,
+        content: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header with icon
+              Container(
+                padding: const EdgeInsets.only(top: 24, bottom: 16),
+                child: Column(
+                  children: [
+                    Container(
+                      width: 70,
+                      height: 70,
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.logout_rounded,
+                        color: Colors.red.shade400,
+                        size: 30,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Logout',
+                      style: AppTypography.titleLarge.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black.withOpacity(0.8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              // Message
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+                child: Text(
+                  'Are you sure you want to logout from your account?',
+                  textAlign: TextAlign.center,
+                  style: AppTypography.bodyMedium.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+              // Buttons
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                child: Row(
+                  children: [
+                    // Cancel button
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.grey.shade100,
+                          foregroundColor: Colors.black.withOpacity(0.7),
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          'Cancel',
+                          style: AppTypography.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Logout button
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          await AuthService().signOut();
+                          if (context.mounted) {
+                            Navigator.of(context).pushReplacementNamed(Routes.login);
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade400,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          'Logout',
+                          style: AppTypography.bodyMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSettingsItem({
     required IconData icon,
     required String title,
-    Color? textColor,
     required VoidCallback onTap,
   }) {
     return InkWell(
@@ -2596,24 +2981,23 @@ class DoctorProfileTab extends ConsumerWidget {
           children: [
             Icon(
               icon,
-              color: textColor ?? AppColors.textSecondary,
+              color: AppColors.textSecondary,
               size: 24,
             ),
             const SizedBox(width: 16),
             Text(
               title,
               style: AppTypography.bodyLarge.copyWith(
-                color: textColor ?? AppColors.textPrimary,
+                color: AppColors.textPrimary,
                 fontWeight: FontWeight.w500,
               ),
             ),
             const Spacer(),
-            if (title != 'Sign Out')
-              const Icon(
-                Icons.chevron_right,
-                color: AppColors.textTertiary,
-                size: 24,
-              ),
+            const Icon(
+              Icons.chevron_right,
+              color: AppColors.textTertiary,
+              size: 24,
+            ),
           ],
         ),
       ),
@@ -2798,7 +3182,6 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
   List<AppointmentModel> _appointments = [];
   List<AppointmentModel> _filteredAppointments = [];
   bool _isLoading = true;
-  DateTime _selectedDate = DateTime.now();
   final TextEditingController _searchController = TextEditingController();
   
   @override
@@ -2837,31 +3220,27 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
   
   void _filterAppointments() {
     if (_searchController.text.isEmpty) {
-      // Filter by selected date only
-      _filteredAppointments = _appointments.where((appointment) {
-        final appointmentDate = appointment.date.toDate();
-        return appointmentDate.year == _selectedDate.year && 
-               appointmentDate.month == _selectedDate.month && 
-               appointmentDate.day == _selectedDate.day;
-      }).toList();
+      // Show all appointments
+      _filteredAppointments = List.from(_appointments);
     } else {
-      // Filter by search text and selected date
+      // Filter by search text only
       final searchText = _searchController.text.toLowerCase();
       _filteredAppointments = _appointments.where((appointment) {
-        final appointmentDate = appointment.date.toDate();
-        final matchesDate = appointmentDate.year == _selectedDate.year && 
-                           appointmentDate.month == _selectedDate.month && 
-                           appointmentDate.day == _selectedDate.day;
-        
         final patientName = appointment.patientDetails?['name']?.toString().toLowerCase() ?? '';
-        final matchesSearch = patientName.contains(searchText);
-        
-        return matchesDate && matchesSearch;
+        return patientName.contains(searchText);
       }).toList();
     }
     
-    // Sort by time
+    // Sort by date first, then by time
     _filteredAppointments.sort((a, b) {
+      final dateA = a.date.toDate();
+      final dateB = b.date.toDate();
+      
+      // First compare dates
+      final dateComparison = dateA.compareTo(dateB);
+      if (dateComparison != 0) return dateComparison;
+      
+      // If same date, compare times
       final timeA = _parseTime(a.time);
       final timeB = _parseTime(b.time);
       return timeA.compareTo(timeB);
@@ -2927,112 +3306,27 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Container(
-                height: 52,
-                width: 52,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: IconButton(
-                  icon: const Icon(
-                    Icons.calendar_today_rounded,
-                    color: AppColors.primary,
-                  ),
-                  onPressed: () async {
-                    final pickedDate = await showDatePicker(
-                      context: context,
-                      initialDate: _selectedDate,
-                      firstDate: DateTime.now().subtract(const Duration(days: 30)),
-                      lastDate: DateTime.now().add(const Duration(days: 365)),
-                      builder: (context, child) {
-                        return Theme(
-                          data: Theme.of(context).copyWith(
-                            colorScheme: const ColorScheme.light(
-                              primary: AppColors.primary,
-                              onPrimary: Colors.white,
-                              surface: Colors.white,
-                              onSurface: AppColors.textPrimary,
-                            ),
-                          ),
-                          child: child!,
-                        );
-                      },
-                    );
-                    
-                    if (pickedDate != null) {
-                      setState(() {
-                        _selectedDate = pickedDate;
-                      });
-                      _filterAppointments();
-                    }
-                  },
-                ),
-              ),
             ],
           ),
         ),
         const SizedBox(height: 16),
         
-        // Selected date indicator
+        // Appointment count indicator
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: AppColors.primary.withOpacity(0.3),
-                    width: 1,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.event,
-                      size: 18,
-                      color: AppColors.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      DateFormat('MMM d, yyyy').format(_selectedDate),
-                      style: AppTypography.bodyMedium.copyWith(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceLight,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              '${_filteredAppointments.length} appointments',
+              style: AppTypography.bodyMedium.copyWith(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w500,
               ),
-              const SizedBox(width: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceLight,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '${_filteredAppointments.length} appointments',
-                  style: AppTypography.bodyMedium.copyWith(
-                    color: AppColors.textSecondary,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ),
         const SizedBox(height: 16),
@@ -3068,7 +3362,7 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'There are no appointments for the selected date',
+                            'You have no upcoming appointments',
                             style: AppTypography.bodyMedium.copyWith(
                               color: AppColors.textSecondary,
                             ),
@@ -3076,18 +3370,14 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
                           ),
                           const SizedBox(height: 24),
                           ElevatedButton.icon(
-                            onPressed: () {
-                              setState(() {
-                                _selectedDate = DateTime.now();
-                              });
-                              _filterAppointments();
-                            },
+                            onPressed: _loadAppointments,
                             icon: const Icon(Icons.refresh_rounded),
-                            label: const Text('Reset Date'),
+                            label: const Text('Refresh'),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
                               foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              minimumSize: const Size(120, 45),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -3113,6 +3403,9 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
     // Parse time for better display
     final timeRange = appointment.time;
     final startTime = timeRange.split(' - ')[0];
+    final appointmentDate = appointment.date.toDate();
+    final isToday = DateUtils.isSameDay(appointmentDate, DateTime.now());
+    final dateStr = isToday ? 'Today' : DateFormat('MMM d, yyyy').format(appointmentDate);
     
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -3140,10 +3433,27 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Time column
+              // Time and date column
               Column(
                 mainAxisAlignment: MainAxisAlignment.start,
                 children: [
+                  // Date indicator
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isToday ? AppColors.error.withOpacity(0.9) : AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      dateStr,
+                      style: AppTypography.bodySmall.copyWith(
+                        color: isToday ? Colors.white : AppColors.textSecondary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // Time indicator
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
@@ -3365,6 +3675,768 @@ class _UpcomingAppointmentsViewState extends ConsumerState<_UpcomingAppointments
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// Doctor Reports Tab
+class DoctorReportsTab extends ConsumerStatefulWidget {
+  final UserModel doctor;
+
+  const DoctorReportsTab({super.key, required this.doctor});
+
+  @override
+  ConsumerState<DoctorReportsTab> createState() => _DoctorReportsTabState();
+}
+
+class _DoctorReportsTabState extends ConsumerState<DoctorReportsTab> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  bool _isLoading = true;
+  List<ReportModel> _draftReports = [];
+  List<ReportModel> _reviewedReports = [];
+  List<ReportModel> _finalizedReports = [];
+  final TextEditingController _searchController = TextEditingController();
+  
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    _loadReports();
+    _searchController.addListener(_filterReports);
+  }
+  
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _searchController.removeListener(_filterReports);
+    _searchController.dispose();
+    super.dispose();
+  }
+  
+  Future<void> _loadReports() async {
+    setState(() {
+      _isLoading = true;
+    });
+    
+    try {
+      final firebaseService = FirebaseService();
+      
+      debugPrint('DoctorReportsTab: Loading reports for doctor ${widget.doctor.id}');
+      debugPrint('DoctorReportsTab: Doctor name: ${widget.doctor.name}');
+      debugPrint('DoctorReportsTab: Doctor role: ${widget.doctor.role}');
+      
+      // Load all reports by status
+      _draftReports = await firebaseService.getReportsByStatus(widget.doctor.id, ReportStatus.draft);
+      _reviewedReports = await firebaseService.getReportsByStatus(widget.doctor.id, ReportStatus.reviewed);
+      _finalizedReports = await firebaseService.getReportsByStatus(widget.doctor.id, ReportStatus.finalized);
+      
+      debugPrint('DoctorReportsTab: Loaded ${_draftReports.length} draft reports, '
+          '${_reviewedReports.length} reviewed reports, '
+          '${_finalizedReports.length} finalized reports');
+      
+      // Check if all draft reports have proper fields
+      if (_draftReports.isNotEmpty) {
+        debugPrint('DoctorReportsTab: First draft report details:');
+        debugPrint('  - ID: ${_draftReports[0].id}');
+        debugPrint('  - Patient: ${_draftReports[0].patientName}');
+        debugPrint('  - Status: ${_draftReports[0].status}');
+        debugPrint('  - Content length: ${_draftReports[0].content.length} characters');
+        debugPrint('  - Doctor ID: ${_draftReports[0].doctorId}');
+      }
+      
+      // If no draft reports, try to get all reports to check if there's an issue
+      if (_draftReports.isEmpty) {
+        debugPrint('DoctorReportsTab: No draft reports found, checking for all reports');
+        final allReports = await firebaseService.getReportsForDoctor(widget.doctor.id);
+        debugPrint('DoctorReportsTab: Found ${allReports.length} total reports');
+        
+        if (allReports.isNotEmpty) {
+          debugPrint('DoctorReportsTab: First report details:');
+          debugPrint('  - ID: ${allReports[0].id}');
+          debugPrint('  - Patient: ${allReports[0].patientName}');
+          debugPrint('  - Status: ${allReports[0].status}');
+          debugPrint('  - Doctor ID: ${allReports[0].doctorId}');
+        } else {
+          // Check if the doctor's ID is properly stored in the user collection
+          final currentDoctor = await firebaseService.getUserById(widget.doctor.id);
+          debugPrint('DoctorReportsTab: Verified doctor exists: ${currentDoctor != null}');
+          
+          // Check if there are any reports at all in the collection
+          final allReportsSnapshot = await FirebaseFirestore.instance.collection('reports').get();
+          debugPrint('DoctorReportsTab: Total reports in collection: ${allReportsSnapshot.docs.length}');
+          
+          if (allReportsSnapshot.docs.isNotEmpty) {
+            final example = allReportsSnapshot.docs.first.data();
+            debugPrint('DoctorReportsTab: Example report doctorId: ${example['doctorId']}');
+          }
+        }
+      }
+      
+      _filterReports();
+    } catch (e) {
+      debugPrint('Error loading reports: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+  
+  void _filterReports() {
+    // Can implement filtering logic here if needed
+    setState(() {});
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        // Header with blue background
+        Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF5386DF), Color(0xFF3A6BC0)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Reports heading with current time
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    "Medical Reports",
+                    style: AppTypography.headlineSmall.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      "${DateFormat('h:mm').format(DateTime.now())} ${DateFormat('a').format(DateTime.now()).toUpperCase()}",
+                      style: AppTypography.bodyMedium.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF5386DF),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // Clean search bar
+              Container(
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search reports',
+                    hintStyle: AppTypography.bodyMedium.copyWith(
+                      color: AppColors.textTertiary,
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.search_rounded,
+                      color: AppColors.textTertiary,
+                    ),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        
+        // Tab selector
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(30),
+            child: Container(
+              height: 48,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF5F7FA),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: TabBar(
+                controller: _tabController,
+                tabs: const [
+                  Tab(text: 'To Review'),
+                  Tab(text: 'Reviewed'),
+                  Tab(text: 'Finalized'),
+                ],
+                labelColor: Colors.white,
+                unselectedLabelColor: AppColors.textSecondary,
+                indicator: BoxDecoration(
+                  color: const Color(0xFF5386DF),
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                dividerHeight: 0,
+                labelPadding: EdgeInsets.zero,
+                padding: const EdgeInsets.all(4),
+                labelStyle: AppTypography.bodyMedium.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+                unselectedLabelStyle: AppTypography.bodyMedium.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
+                indicatorSize: TabBarIndicatorSize.tab,
+              ),
+            ),
+          ),
+        ),
+        
+        // Content area
+        Expanded(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildReportsList(_draftReports, ReportStatus.draft),
+                    _buildReportsList(_reviewedReports, ReportStatus.reviewed),
+                    _buildReportsList(_finalizedReports, ReportStatus.finalized),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReportsList(List<ReportModel> reports, ReportStatus status) {
+    if (reports.isEmpty) {
+      return _buildEmptyState(status);
+    }
+    
+    return RefreshIndicator(
+      onRefresh: _loadReports,
+      child: ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: reports.length,
+        itemBuilder: (context, index) {
+          return _buildReportCard(reports[index], status);
+        },
+      ),
+    );
+  }
+  
+  Widget _buildEmptyState(ReportStatus status) {
+    String title;
+    String message;
+    IconData icon;
+    
+    switch (status) {
+      case ReportStatus.draft:
+        title = 'No Reports to Review';
+        message = 'You don\'t have any patient reports that need review';
+        icon = Icons.description_outlined;
+        break;
+      case ReportStatus.reviewed:
+        title = 'No Reviewed Reports';
+        message = 'You haven\'t reviewed any reports yet';
+        icon = Icons.fact_check_outlined;
+        break;
+      case ReportStatus.finalized:
+        title = 'No Finalized Reports';
+        message = 'You haven\'t finalized any reports yet';
+        icon = Icons.check_circle_outline;
+        break;
+    }
+    
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            icon,
+            size: 72,
+            color: AppColors.surfaceDark,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            title,
+            style: AppTypography.titleLarge.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              message,
+              style: AppTypography.bodyMedium.copyWith(
+                color: AppColors.textSecondary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReportCard(ReportModel report, ReportStatus status) {
+    final formattedDate = DateFormat('MMM d, yyyy').format(report.createdAt.toDate());
+    
+    // Get status info
+    Color statusColor;
+    String statusText;
+    IconData statusIcon;
+    
+    switch (status) {
+      case ReportStatus.draft:
+        statusColor = AppColors.warning;
+        statusText = 'Needs Review';
+        statusIcon = Icons.pending_outlined;
+        break;
+      case ReportStatus.reviewed:
+        statusColor = AppColors.info;
+        statusText = 'Reviewed';
+        statusIcon = Icons.fact_check_outlined;
+        break;
+      case ReportStatus.finalized:
+        statusColor = AppColors.success;
+        statusText = 'Finalized';
+        statusIcon = Icons.check_circle_outline;
+        break;
+    }
+    
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: InkWell(
+        onTap: () {
+          // Navigate to report details or editing page
+          Navigator.pushNamed(
+            context, 
+            '/reports/${report.id}',
+          ).then((_) => _loadReports());
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Patient avatar
+                  Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6C7FDF).withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Text(
+                        report.patientName.split(' ').map((e) => e.isNotEmpty ? e[0] : '').join().toUpperCase(),
+                        style: AppTypography.titleLarge.copyWith(
+                          color: const Color(0xFF6C7FDF),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  
+                  // Report info
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          report.patientName,
+                          style: AppTypography.titleMedium.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Submitted on $formattedDate',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  
+                  // Status badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: statusColor.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: statusColor.withOpacity(0.3),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          statusIcon,
+                          size: 14,
+                          color: statusColor,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          statusText,
+                          style: AppTypography.bodySmall.copyWith(
+                            color: statusColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Divider(height: 1),
+              const SizedBox(height: 16),
+              
+              // Report preview
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Report Content:',
+                    style: AppTypography.bodySmall.copyWith(
+                      color: AppColors.textSecondary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF9FAFC),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: const Color(0xFFE5E8EC),
+                        width: 1,
+                      ),
+                    ),
+                    child: Text(
+                      report.content.length > 100
+                          ? '${report.content.substring(0, 100)}...'
+                          : report.content,
+                      style: AppTypography.bodyMedium,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              
+              // Action buttons based on status
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  if (status == ReportStatus.draft) ...[
+                    _buildActionButton(
+                      label: 'Review',
+                      icon: Icons.edit_note,
+                      isPrimary: true,
+                      onTap: () {
+                        // Navigate to review page
+                        Navigator.pushNamed(
+                          context, 
+                          '/reports/${report.id}/review',
+                        ).then((_) => _loadReports());
+                      },
+                    ),
+                  ] else if (status == ReportStatus.reviewed) ...[
+                    _buildActionButton(
+                      label: 'Edit',
+                      icon: Icons.edit,
+                      isPrimary: false,
+                      onTap: () {
+                        // Navigate to edit review
+                        Navigator.pushNamed(
+                          context, 
+                          '/reports/${report.id}/review',
+                        ).then((_) => _loadReports());
+                      },
+                    ),
+                    const SizedBox(width: 12),
+                    _buildActionButton(
+                      label: 'Finalize',
+                      icon: Icons.check_circle,
+                      isPrimary: true,
+                      onTap: () async {
+                        // Finalize report
+                        try {
+                          final firebaseService = FirebaseService();
+                          await firebaseService.finalizeAndSendReport(report.id, null);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Report finalized and sent to patient')),
+                            );
+                            _loadReports();
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Error: $e')),
+                            );
+                          }
+                        }
+                      },
+                    ),
+                  ] else if (status == ReportStatus.finalized) ...[
+                    _buildActionButton(
+                      label: 'View PDF',
+                      icon: Icons.visibility,
+                      isPrimary: false,
+                      onTap: () {
+                        // View PDF if available
+                        if (report.pdfUrl != null) {
+                          // Open PDF viewer
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('PDF not available for this report')),
+                          );
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 12),
+                    _buildActionButton(
+                      label: 'Share',
+                      icon: Icons.share_rounded,
+                      isPrimary: false,
+                      onTap: () async {
+                        // Show share options dialog
+                        final recipientId = await _showShareOptionsDialog(report);
+                        if (recipientId != null && context.mounted) {
+                          try {
+                            final firebaseService = FirebaseService();
+                            // Share the medical document
+                            await firebaseService.shareMedicalDocument(
+                              senderId: widget.doctor.id,
+                              recipientId: recipientId,
+                              documentName: 'Medical Report - ${report.patientName}',
+                              documentUrl: report.pdfUrl ?? '',
+                              documentType: 'medical_report',
+                              description: 'Medical report based on pre-assessment data',
+                            );
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Report shared successfully')),
+                              );
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Error sharing report: $e')),
+                              );
+                            }
+                          }
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 12),
+                    _buildActionButton(
+                      label: 'Send Again',
+                      icon: Icons.send,
+                      isPrimary: true,
+                      onTap: () async {
+                        // Send report again
+                        try {
+                          final firebaseService = FirebaseService();
+                          await firebaseService.finalizeAndSendReport(report.id, report.pdfUrl);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Report sent to patient again')),
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Error: $e')),
+                            );
+                          }
+                        }
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildActionButton({
+    required String label,
+    required IconData icon,
+    required bool isPrimary,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: isPrimary ? AppColors.primary : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isPrimary ? AppColors.primary : AppColors.surfaceDark,
+              width: 1,
+            ),
+            boxShadow: isPrimary ? [
+              BoxShadow(
+                color: AppColors.primary.withOpacity(0.2),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ] : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: isPrimary ? Colors.white : AppColors.primary,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: AppTypography.bodyMedium.copyWith(
+                  color: isPrimary ? Colors.white : AppColors.primary,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  
+  // Method to show share options dialog
+  Future<String?> _showShareOptionsDialog(ReportModel report) async {
+    // Default to the patient the report belongs to
+    String? selectedRecipientId = report.patientId;
+    
+    // Show a dialog to confirm sharing
+    return showDialog<String?>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Share Medical Report'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Share this report with:', style: AppTypography.titleSmall),
+            const SizedBox(height: 16),
+            // Simple option to share with the patient by default
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: RadioListTile<String>(
+                title: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: Text(
+                          report.patientName.split(' ').map((e) => e.isNotEmpty ? e[0] : '').join().toUpperCase(),
+                          style: AppTypography.titleMedium.copyWith(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(report.patientName, style: AppTypography.bodyMedium.copyWith(fontWeight: FontWeight.w600)),
+                        Text('Patient', style: AppTypography.bodySmall.copyWith(color: AppColors.textSecondary)),
+                      ],
+                    ),
+                  ],
+                ),
+                value: report.patientId,
+                groupValue: selectedRecipientId,
+                onChanged: (value) {
+                  selectedRecipientId = value;
+                },
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, selectedRecipientId),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Share'),
+          ),
+        ],
       ),
     );
   }

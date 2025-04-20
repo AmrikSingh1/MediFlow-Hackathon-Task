@@ -772,8 +772,6 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
                 hint: 'Enter your full address',
                 prefixIcon: Icons.home,
                 keyboardType: TextInputType.streetAddress,
-                maxLines: 2,
-                contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'Please enter your address';
@@ -815,8 +813,6 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
                 label: 'Current Medications',
                 hint: 'Enter any medications you are taking',
                 prefixIcon: Icons.medication,
-                maxLines: 2,
-                contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
               ),
               
               // Chronic Conditions
@@ -825,8 +821,6 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
                 label: 'Chronic Conditions',
                 hint: 'Enter any chronic health conditions',
                 prefixIcon: Icons.health_and_safety,
-                maxLines: 2,
-                contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
               ),
               
               // Surgical History
@@ -835,8 +829,6 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
                 label: 'Surgical History',
                 hint: 'Enter any past surgeries',
                 prefixIcon: Icons.medical_services,
-                maxLines: 2,
-                contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
               ),
               
               // Family Medical History
@@ -845,8 +837,89 @@ class _PatientProfilePageState extends ConsumerState<PatientProfilePage> {
                 label: 'Family Medical History',
                 hint: 'Enter any relevant family medical history',
                 prefixIcon: Icons.family_restroom,
-                maxLines: 2,
-                contentPadding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+              ),
+              
+              const SizedBox(height: 32),
+              
+              // Invitations and Connections Section
+              Text(
+                'Doctor Connections',
+                style: AppTypography.titleLarge.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF2D3748),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Manage your connections with healthcare providers.',
+                style: AppTypography.bodySmall.copyWith(
+                  color: const Color(0xFF718096),
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              // View Invitations Button
+              GestureDetector(
+                onTap: () {
+                  Navigator.of(context).pushNamed(Routes.viewInvitations);
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color(0xFFE2E8F0),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.mail_outline,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Doctor Invitations',
+                              style: AppTypography.bodyLarge.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'View and respond to invitations from doctors',
+                              style: AppTypography.bodySmall.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right,
+                        color: Color(0xFF9AA5B1),
+                      ),
+                    ],
+                  ),
+                ),
               ),
               
               const SizedBox(height: 32),

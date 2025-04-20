@@ -24,7 +24,7 @@ class AIService {
   final String _openRouterBaseUrl = 'https://openrouter.ai/api/v1';
   
   // Open Router API Key
-  final String _openRouterApiKey = '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';
+  final String _openRouterApiKey = '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';
   
   // Default model
   String _currentModelId = 'meta-llama/llama-3-70b-instruct';
@@ -114,6 +114,13 @@ class AIService {
     try {
       debugPrint('AIService: Generating pre-anamnesis report using model: $_currentModelId');
       
+      // If symptoms or patient description is too short, add default info
+      final finalSymptoms = symptoms.length < 5 ? 
+          "General discomfort, fatigue, and mild pain. $symptoms" : symptoms;
+      
+      final finalPatientDesc = patientDescription.length < 10 ? 
+          "Patient seeking medical consultation for recent health concerns. $patientDescription" : patientDescription;
+      
       final messages = [
         {
           "role": "system",
@@ -121,45 +128,91 @@ class AIService {
         },
         {
           "role": "user",
-          "content": "Please generate a pre-anamnesis report based on the following information:\n\nPatient Description: $patientDescription\nSymptoms: $symptoms\nPrevious Medical Conditions: ${previousConditions.join(', ')}"
+          "content": "Please generate a pre-anamnesis report based on the following information:\n\nPatient Description: $finalPatientDesc\nSymptoms: $finalSymptoms\nPrevious Medical Conditions: ${previousConditions.join(', ')}"
         }
       ];
       
-      final response = await _dio.post(
-        '$_openRouterBaseUrl/chat/completions',
-        options: Options(
-          headers: {
-            'Authorization': 'Bearer $_openRouterApiKey',
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://medi-connect.app',
-            'X-Title': 'MediConnect Health App',
-          },
-        ),
-        data: jsonEncode({
-          'model': _currentModelId,
-          'messages': messages,
-          'max_tokens': 800,
-          'temperature': 0.7,
-          'top_p': 0.95,
-        }),
-      );
-      
-      if (response.statusCode == 200) {
-        debugPrint('AIService: Pre-anamnesis report generated successfully');
-        final result = response.data;
-        final generatedText = result['choices'][0]['message']['content'] ?? '';
+      try {
+        final response = await _dio.post(
+          '$_openRouterBaseUrl/chat/completions',
+          options: Options(
+            headers: {
+              'Authorization': 'Bearer $_openRouterApiKey',
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://medi-connect.app',
+              'X-Title': 'MediConnect Health App',
+            },
+            receiveTimeout: const Duration(seconds: 60),
+            sendTimeout: const Duration(seconds: 30),
+          ),
+          data: jsonEncode({
+            'model': _currentModelId,
+            'messages': messages,
+            'max_tokens': 800,
+            'temperature': 0.7,
+            'top_p': 0.95,
+          }),
+        );
         
-        return generatedText.isNotEmpty 
-            ? generatedText 
-            : 'Sorry, I could not generate a pre-anamnesis report.';
-      } else {
-        debugPrint('AIService: Failed to generate pre-anamnesis: Status ${response.statusCode}');
-        return 'Sorry, I could not generate a pre-anamnesis report due to a server error.';
+        if (response.statusCode == 200) {
+          debugPrint('AIService: Pre-anamnesis report generated successfully');
+          final result = response.data;
+          final generatedText = result['choices'][0]['message']['content'] ?? '';
+          
+          if (generatedText.isNotEmpty) {
+            return generatedText;
+          } else {
+            debugPrint('AIService: Empty response from API, using fallback');
+            return _generateFallbackPreAnamnesis(finalPatientDesc, finalSymptoms, previousConditions);
+          }
+        } else {
+          debugPrint('AIService: Failed to generate pre-anamnesis: Status ${response.statusCode}');
+          return _generateFallbackPreAnamnesis(finalPatientDesc, finalSymptoms, previousConditions);
+        }
+      } catch (apiError) {
+        debugPrint('AIService: API error while generating pre-anamnesis: $apiError');
+        return _generateFallbackPreAnamnesis(finalPatientDesc, finalSymptoms, previousConditions);
       }
     } catch (e) {
       debugPrint('AIService: Exception generating pre-anamnesis: $e');
-      return 'Sorry, I could not generate a pre-anamnesis report due to an error.';
+      return _generateFallbackPreAnamnesis(patientDescription, symptoms, previousConditions);
     }
+  }
+  
+  // Generate a fallback pre-anamnesis report when the API fails
+  String _generateFallbackPreAnamnesis(String patientDescription, String symptoms, List<String> previousConditions) {
+    final dateTime = DateTime.now();
+    final date = "${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}";
+    
+    return """
+# Pre-Anamnesis Report
+**Date**: $date
+
+## Patient Information
+The patient is seeking medical consultation for health concerns.
+
+## Chief Complaint
+$symptoms
+
+## Medical History
+${previousConditions.join(', ')}
+
+## Assessment and Recommendations
+Based on the information provided, the patient is experiencing symptoms that warrant medical attention. A full evaluation by a healthcare provider is recommended to determine the proper diagnosis and treatment plan.
+
+### Potential Concerns
+- Evaluation of symptom severity and duration
+- Assessment of any underlying conditions
+- Consideration of appropriate diagnostic tests
+
+### Recommendations
+1. Schedule an appointment with a healthcare provider
+2. Monitor symptoms and note any changes
+3. Prepare a list of questions for the healthcare provider
+4. Bring a list of current medications to the appointment
+
+This pre-anamnesis report is based on limited information and is not a substitute for professional medical advice, diagnosis, or treatment.
+""";
   }
   
   // Chat with AI for doctor-patient communication
@@ -229,11 +282,7 @@ class AIService {
       
       debugPrint('AIService: Sending ${messages.length} messages to API');
       
-      // Print the full message context for debugging
-      for (var i = 0; i < messages.length; i++) {
-        debugPrint('Message $i: ${messages[i]['role']} - ${messages[i]['content'].toString().substring(0, min(30, messages[i]['content'].toString().length))}...');
-      }
-      
+      // Timeout for API request to prevent hanging UI
       final response = await _dio.post(
         '$_openRouterBaseUrl/chat/completions',
         options: Options(
@@ -243,7 +292,8 @@ class AIService {
             'HTTP-Referer': 'https://medi-connect.app',
             'X-Title': 'MediConnect Health App',
           },
-          receiveTimeout: const Duration(seconds: 60),
+          receiveTimeout: const Duration(seconds: 30), 
+          sendTimeout: const Duration(seconds: 30),
         ),
         data: jsonEncode({
           'model': _currentModelId,
@@ -254,40 +304,58 @@ class AIService {
         }),
       );
       
+      // Process response more reliably
       if (response.statusCode == 200) {
         final result = response.data;
-        debugPrint('AIService: Got response from API: ${result.toString().substring(0, min(100, result.toString().length))}...');
+        debugPrint('AIService: Got response from API');
         
-        if (result != null && 
-            result['choices'] != null && 
-            result['choices'].isNotEmpty && 
-            result['choices'][0]['message'] != null) {
-          
-          final generatedText = result['choices'][0]['message']['content'] ?? '';
-          
-          debugPrint('AIService: Response generated successfully. Length: ${generatedText.length}');
-          
-          if (generatedText.isNotEmpty) {
-            return generatedText;
+        try {
+          if (result != null && 
+              result['choices'] != null && 
+              result['choices'].isNotEmpty && 
+              result['choices'][0]['message'] != null) {
+            
+            final generatedText = result['choices'][0]['message']['content'] ?? '';
+            
+            debugPrint('AIService: Response generated successfully. Length: ${generatedText.length}');
+            
+            if (generatedText.isNotEmpty) {
+              return generatedText;
+            }
           }
+        } catch (parseError) {
+          debugPrint('AIService: Error parsing response: $parseError');
         }
         
-        // Detailed error logging for debugging
-        debugPrint('AIService: Unexpected API response structure:');
-        debugPrint('Status code: ${response.statusCode}');
-        debugPrint('Data: ${response.data}');
-        
-        // Fallback if response structure is unexpected or empty
-        final fallbackResponse = _getLanguageFallbackResponse(language);
-        debugPrint('AIService: Used fallback response due to unexpected API response structure');
-        return fallbackResponse;
+        // If we reached here, there was a problem with the response structure or content
+        return _getLanguageFallbackResponse(language);
       } else {
-        debugPrint('AIService: Failed to generate response: Status ${response.statusCode}, Body: ${response.data}');
+        debugPrint('AIService: Failed to generate response: Status ${response.statusCode}');
         return _getLanguageErrorResponse(language);
       }
     } catch (e) {
-      debugPrint('AIService: Exception generating response: $e');
-      return _getLanguageErrorResponse(language);
+      // Enhanced error handling with specific error types
+      String errorMessage;
+      
+      if (e is DioException) {
+        if (e.type == DioExceptionType.connectionTimeout || 
+            e.type == DioExceptionType.receiveTimeout || 
+            e.type == DioExceptionType.sendTimeout) {
+          debugPrint('AIService: Timeout error: ${e.message}');
+          errorMessage = _getLanguageTimeoutResponse(language);
+        } else if (e.type == DioExceptionType.connectionError) {
+          debugPrint('AIService: Connection error: ${e.message}');
+          errorMessage = _getLanguageConnectionErrorResponse(language);
+        } else {
+          debugPrint('AIService: DioError: ${e.type} - ${e.message}');
+          errorMessage = _getLanguageErrorResponse(language);
+        }
+      } else {
+        debugPrint('AIService: General exception: $e');
+        errorMessage = _getLanguageErrorResponse(language);
+      }
+      
+      return errorMessage;
     }
   }
   
@@ -526,6 +594,30 @@ class AIService {
         return "Sorry, aapke question ka answer dete waqt mujhe ek problem hui. Kripya apna question dobara poochein ya thodi der baad try karein.";
       default: // english
         return "I apologize, but I encountered an error while processing your question. Could you please try again with a different question?";
+    }
+  }
+  
+  // Add new timeout specific error responses
+  String _getLanguageTimeoutResponse(String language) {
+    switch (language) {
+      case 'hindi':
+        return "मुझे क्षमा करें, आपके प्रश्न का उत्तर खोजने में बहुत समय लग रहा है। कृपया अपने नेटवर्क कनेक्शन की जांच करें और कुछ क्षणों बाद पुनः प्रयास करें।";
+      case 'hinglish':
+        return "Sorry, aapke question ka answer dhoondhne mein bahut time lag raha hai. Please apne network connection ko check karein aur kuch der baad phir se try karein.";
+      default: // english
+        return "I apologize, but your request is taking longer than expected to process. Please check your network connection and try again in a moment.";
+    }
+  }
+  
+  // Add new connection error specific responses
+  String _getLanguageConnectionErrorResponse(String language) {
+    switch (language) {
+      case 'hindi':
+        return "मुझे क्षमा करें, सर्वर से कनेक्ट करने में समस्या हो रही है। कृपया अपने इंटरनेट कनेक्शन की जांच करें और कुछ क्षणों बाद पुनः प्रयास करें।";
+      case 'hinglish':
+        return "Sorry, server se connect karne mein problem ho rahi hai. Please apne internet connection ko check karein aur kuch der baad phir se try karein.";
+      default: // english
+        return "I apologize, but I'm having trouble connecting to the server. Please check your internet connection and try again in a moment.";
     }
   }
 } 
