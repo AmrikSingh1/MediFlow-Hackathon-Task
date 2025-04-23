@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -20,9 +22,34 @@
 	<string>$(FLUTTER_BUILD_NAME)</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.494610997488-m0c540ufihhmq4selfn4v7orfc4ao0gc</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>MediConnect needs access to your camera to send photos in chats with healthcare providers.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>MediConnect needs access to your health data to provide personalized medical insights and allow your doctors to monitor your progress. Your data remains private and is only shared with healthcare providers you explicitly authorize.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>MediConnect needs permission to update your health data to keep track of your medical metrics and treatment progress. This helps healthcare providers monitor your health status accurately and provide better care.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>MediConnect needs access to your location when sharing your location with healthcare providers.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>MediConnect needs access to your location when sharing your location with healthcare providers.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>MediConnect needs access to your photo library to send images in chats with healthcare providers.</string>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
@@ -41,17 +68,5 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
-	<key>NSCameraUsageDescription</key>
-	<string>MediConnect needs access to your camera to send photos in chats with healthcare providers.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>MediConnect needs access to your photo library to send images in chats with healthcare providers.</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>MediConnect needs access to your location when sharing your location with healthcare providers.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>MediConnect needs access to your location when sharing your location with healthcare providers.</string>
 </dict>
 </plist>
