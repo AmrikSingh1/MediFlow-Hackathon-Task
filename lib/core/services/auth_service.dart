@@ -1,18 +1,16 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:medi_connect/core/models/user_model.dart';
 import 'package:medi_connect/core/services/firebase_service.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'dart:math';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 
 class AuthService extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    scopes: <String>[
-      'email',
-      'profile',
-    ],
-  );
   final FirebaseService _firebaseService = FirebaseService();
   UserModel? _userModel;
   
@@ -114,102 +112,73 @@ class AuthService extends ChangeNotifier {
     }
   }
   
-  // Sign in with Google
-  Future<UserCredential> signInWithGoogle() async {
+  /// Generates a cryptographically secure random nonce, to be included in a
+  /// credential request.
+  String _generateNonce([int length = 32]) {
+    const charset = '0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._';
+    final random = Random.secure();
+    return List.generate(length, (_) => charset[random.nextInt(charset.length)]).join();
+  }
+
+  /// Returns the sha256 hash of [input] in hex notation.
+  String _sha256ofString(String input) {
+    final bytes = utf8.encode(input);
+    final digest = sha256.convert(bytes);
+    return digest.toString();
+  }
+  
+  // Sign in with Apple
+  Future<UserCredential> signInWithApple() async {
     try {
-      debugPrint("===== STARTING GOOGLE SIGN-IN PROCESS =====");
+      debugPrint("===== STARTING APPLE SIGN-IN PROCESS =====");
       debugPrint("Current platform: ${defaultTargetPlatform.toString()}");
       
-      // First try to clear any existing sign-in sessions
-      try {
-        await _googleSignIn.signOut();
-        debugPrint("✓ Successfully signed out any existing Google sessions");
-      } catch (e) {
-        debugPrint("! No existing Google session to sign out: $e");
-      }
-      
-      // 1. Google Sign-In with better error handling
-      debugPrint("1. Attempting to get GoogleSignInAccount...");
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn()
-          .timeout(
-            const Duration(minutes: 1),
-            onTimeout: () {
-              debugPrint("! Google Sign-In timed out after 1 minute");
-              throw FirebaseAuthException(
-                code: 'ERROR_SIGN_IN_TIMEOUT',
-                message: 'Google Sign-In timed out. Please try again.',
-              );
-            },
-          )
-          .catchError((error) {
-            debugPrint("! Error during Google Sign-In: $error");
-            if (error.toString().contains('network')) {
-              throw FirebaseAuthException(
-                code: 'ERROR_NETWORK_REQUEST_FAILED',
-                message: 'Network error during sign in. Please check your connection.',
-              );
-            }
-            throw FirebaseAuthException(
-              code: 'ERROR_GOOGLE_SIGN_IN_FAILED',
-              message: 'Google Sign-In failed: ${error.toString()}',
-            );
-          });
-      
-      if (googleUser == null) {
-        debugPrint("! Sign-in aborted: User canceled the sign-in process");
+      // Check if Apple Sign In is available (returns false on simulators)
+      final bool isAvailable = await SignInWithApple.isAvailable();
+      if (!isAvailable) {
+        debugPrint("! Apple Sign In is not available on this device (likely a simulator)");
         throw FirebaseAuthException(
-          code: 'ERROR_ABORTED_BY_USER',
-          message: 'Sign in aborted by user',
+          code: 'ERROR_APPLE_SIGN_IN_NOT_AVAILABLE',
+          message: 'Apple Sign In is not available on this device. Please use a physical device or another sign-in method.',
         );
       }
       
-      debugPrint("✓ Google Sign-In successful for: ${googleUser.email}");
-      debugPrint("  User ID: ${googleUser.id}");
-      debugPrint("  Display name: ${googleUser.displayName}");
-      
-      // 2. Get authentication credentials with better error handling
-      debugPrint("2. Getting Google authentication tokens...");
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication
-          .timeout(
-            const Duration(seconds: 30),
-            onTimeout: () {
-              debugPrint("! Authentication token request timed out");
-              throw FirebaseAuthException(
-                code: 'ERROR_AUTH_TOKEN_TIMEOUT',
-                message: 'Authentication token request timed out. Please try again.',
-              );
-            },
-          )
-          .catchError((error) {
-            debugPrint("! Error getting Google authentication: $error");
-            throw FirebaseAuthException(
-              code: 'ERROR_GOOGLE_AUTH_FAILED',
-              message: 'Failed to get Google authentication: ${error.toString()}',
-            );
-          });
-      
-      debugPrint("  Received authentication tokens:");
-      debugPrint("  Access token exists: ${googleAuth.accessToken != null}");
-      debugPrint("  ID token exists: ${googleAuth.idToken != null}");
-      
-      if (googleAuth.accessToken == null || googleAuth.idToken == null) {
-        debugPrint("! Google Auth tokens are null");
-        throw FirebaseAuthException(
-          code: 'ERROR_MISSING_GOOGLE_AUTH_TOKEN',
-          message: 'Google authentication tokens are missing',
-        );
-      }
-      
-      // Create the credential
-      debugPrint("3. Creating Firebase credential with Google tokens...");
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
+      // To prevent replay attacks with the credential returned from Apple, we
+      // include a nonce in the credential request. When signing in with
+      // Firebase, the nonce in the id token returned by Apple, is expected to
+      // match the sha256 hash of `rawNonce`.
+      final rawNonce = _generateNonce();
+      final nonce = _sha256ofString(rawNonce);
+
+      // Request credential for the currently signed in Apple account.
+      final appleCredential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+        nonce: nonce,
       );
+
+      debugPrint("✓ Apple Sign-In successful");
+      debugPrint("  Identity token exists: ${appleCredential.identityToken != null}");
       
-      // 3. Sign in to Firebase with credentials
-      debugPrint("4. Signing in to Firebase with Google credentials...");
-      final userCredential = await _auth.signInWithCredential(credential)
+      if (appleCredential.identityToken == null) {
+        debugPrint("! Apple identity token is null");
+        throw FirebaseAuthException(
+          code: 'ERROR_MISSING_APPLE_AUTH_TOKEN',
+          message: 'Apple authentication token is missing',
+        );
+      }
+
+      // Create an OAuthCredential from the credential returned by Apple.
+      final oauthCredential = OAuthProvider("apple.com").credential(
+        idToken: appleCredential.identityToken!,
+        rawNonce: rawNonce,
+      );
+
+      debugPrint("3. Signing in to Firebase with Apple credentials...");
+      // Sign in to Firebase with the Apple OAuthCredential.
+      final userCredential = await _auth.signInWithCredential(oauthCredential)
           .timeout(
             const Duration(seconds: 30),
             onTimeout: () {
@@ -219,36 +188,8 @@ class AuthService extends ChangeNotifier {
                 message: 'Firebase authentication timed out. Please try again.',
               );
             },
-          )
-          .catchError((error) {
-            debugPrint("! Firebase Auth sign-in failed: $error");
-            
-            // Handle specific Firebase auth errors
-            if (error is FirebaseAuthException) {
-              switch (error.code) {
-                case 'account-exists-with-different-credential':
-                  debugPrint("! Account exists with different credential");
-                  throw FirebaseAuthException(
-                    code: error.code,
-                    message: 'An account already exists with the same email. Try another sign-in method.',
-                  );
-                case 'invalid-credential':
-                  debugPrint("! Invalid credential");
-                  throw FirebaseAuthException(
-                    code: error.code,
-                    message: 'The authentication credential is invalid. Please try again.',
-                  );
-                default:
-                  throw error;
-              }
-            }
-            
-            throw FirebaseAuthException(
-              code: 'ERROR_FIREBASE_AUTH_FAILED',
-              message: 'Firebase authentication failed: ${error.toString()}',
-            );
-          });
-      
+          );
+          
       if (userCredential.user == null) {
         debugPrint("! No user returned from Firebase Auth");
         throw FirebaseAuthException(
@@ -259,8 +200,19 @@ class AuthService extends ChangeNotifier {
       
       debugPrint("✓ Firebase Auth credential successful. User ID: ${userCredential.user?.uid}");
       
-      // 4. Check if user exists in Firestore
-      debugPrint("5. Checking if user exists in Firestore...");
+      // If the user doesn't have a display name (subsequent sign-ins won't return name)
+      // but we got one from Apple, update the Firebase user's display name
+      if (userCredential.user?.displayName == null || 
+          userCredential.user!.displayName!.isEmpty) {
+        if (appleCredential.givenName != null && appleCredential.familyName != null) {
+          await userCredential.user!.updateDisplayName(
+            '${appleCredential.givenName} ${appleCredential.familyName}'
+          );
+        }
+      }
+      
+      // Check if user exists in Firestore
+      debugPrint("4. Checking if user exists in Firestore...");
       if (userCredential.user != null) {
         final user = userCredential.user!;
         
@@ -272,7 +224,7 @@ class AuthService extends ChangeNotifier {
           debugPrint("! Error getting ID token: $e");
         }
         
-        // 5. Check if user exists in Firestore
+        // Check if user exists in Firestore
         try {
           final existingUser = await _firebaseService.getUserById(user.uid);
           
@@ -302,17 +254,28 @@ class AuthService extends ChangeNotifier {
         }
       }
       
-      debugPrint("===== GOOGLE SIGN-IN PROCESS COMPLETED =====");
+      // Check if Firebase is properly initialized
+      try {
+        final app = Firebase.app();
+        debugPrint("✓ Firebase app is initialized: ${app.name}");
+      } catch (e) {
+        debugPrint("! Firebase is not properly initialized: $e");
+        throw FirebaseAuthException(
+          code: 'ERROR_FIREBASE_NOT_INITIALIZED',
+          message: 'Firebase is not properly initialized. Please restart the app.',
+        );
+      }
+      
+      debugPrint("===== APPLE SIGN-IN PROCESS COMPLETED =====");
       return userCredential;
     } catch (e) {
-      debugPrint("! ERROR in Google Sign-In: $e");
+      debugPrint("! ERROR in Apple Sign-In: $e");
       rethrow;
     }
   }
   
   // Sign out
   Future<void> signOut() async {
-    await _googleSignIn.signOut();
     await _auth.signOut();
     _userModel = null;
     notifyListeners();

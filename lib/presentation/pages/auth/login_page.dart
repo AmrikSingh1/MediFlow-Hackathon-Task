@@ -13,15 +13,26 @@ import 'package:medi_connect/presentation/widgets/custom_text_field.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:medi_connect/core/models/user_model.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 // Provider for the auth service
-final authServiceProvider = Provider<AuthService>((ref) {
-  return AuthService();
+final authServiceProvider = Provider<AuthService?>((ref) {
+  try {
+    return AuthService();
+  } catch (e) {
+    print("Error creating AuthService: $e");
+    return null;
+  }
 });
 
 // Provider for the firebase service
-final firebaseServiceProvider = Provider<FirebaseService>((ref) {
-  return FirebaseService();
+final firebaseServiceProvider = Provider<FirebaseService?>((ref) {
+  try {
+    return FirebaseService();
+  } catch (e) {
+    print("Error creating FirebaseService: $e");
+    return null;
+  }
 });
 
 class LoginPage extends ConsumerStatefulWidget {
@@ -42,7 +53,8 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
-  late AuthService _authService;
+  AuthService? _authService;
+  bool _isFirebaseAvailable = false;
 
   @override
   void initState() {
@@ -64,7 +76,15 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
       ),
     );
     _animationController.forward();
-    _authService = ref.read(authServiceProvider);
+    
+    // Try to get the AuthService, but don't crash if it's not available
+    try {
+      _authService = ref.read(authServiceProvider);
+      _isFirebaseAvailable = _authService != null;
+    } catch (e) {
+      print("Failed to initialize AuthService: $e");
+      _isFirebaseAvailable = false;
+    }
   }
 
   @override
@@ -83,24 +103,28 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
       });
 
       try {
-        await _authService.signInWithEmailAndPassword(
+        if (!_isFirebaseAvailable) {
+          throw Exception("Firebase is not available. Please check your internet connection and try again.");
+        }
+        
+        await _authService!.signInWithEmailAndPassword(
           _emailController.text.trim(),
           _passwordController.text,
         );
 
         // Check if user needs to complete their profile
-        final isProfileComplete = await _authService.isUserProfileComplete();
+        final isProfileComplete = await _authService!.isUserProfileComplete();
         
         if (mounted) {
           if (!isProfileComplete) {
-            final userModel = await _authService.getCurrentUserData();
+            final userModel = await _authService!.getCurrentUserData();
             if (userModel?.role == UserRole.patient) {
               Navigator.of(context).pushReplacementNamed(Routes.patientProfile);
             } else {
               Navigator.of(context).pushReplacementNamed(Routes.doctorProfile);
             }
           } else {
-            final userModel = await _authService.getCurrentUserData();
+            final userModel = await _authService!.getCurrentUserData();
             if (userModel?.role == UserRole.patient) {
               Navigator.of(context).pushReplacementNamed(Routes.home);
             } else {
@@ -122,22 +146,64 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
     }
   }
 
-  Future<void> _loginWithGoogle() async {
+  Future<void> _loginWithApple() async {
+    if (!_isFirebaseAvailable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Firebase is not available. Please check your internet connection and try again."),
+          backgroundColor: Colors.red[700],
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'Dismiss',
+            textColor: Colors.white,
+            onPressed: () {},
+          ),
+        ),
+      );
+      return;
+    }
+    
     setState(() {
       _isLoading = true;
       _errorMessage = '';
     });
 
     try {
-      debugPrint("Attempting Google sign-in from login page");
-      final userCredential = await _authService.signInWithGoogle();
+      debugPrint("Attempting Apple sign-in from login page");
+      
+      // Check if running on a simulator (this is a simplistic check, we're detecting based on error handling)
+      final bool isSimulator = defaultTargetPlatform == TargetPlatform.iOS && 
+                               !await SignInWithApple.isAvailable();
+                              
+      if (isSimulator) {
+        // On simulator, we can't perform actual Apple Sign In, so show a message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Apple Sign In doesn't work on simulator. Please use email sign in or test on a real device."),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Apple Sign In is not available on simulator';
+        });
+        return;
+      }
+      
+      final userCredential = await _authService!.signInWithApple();
       
       if (userCredential.user != null) {
         final user = userCredential.user!;
         final isNewUser = user.metadata.creationTime?.isAtSameMomentAs(user.metadata.lastSignInTime!) ?? false;
         
         // Get the user data from Firestore
-        final userModel = await ref.read(firebaseServiceProvider).getUserById(user.uid);
+        final userModel = await ref.read(firebaseServiceProvider)!.getUserById(user.uid);
         
         if (isNewUser || userModel == null) {
           // If it's a new user, show user type selection dialog
@@ -152,7 +218,7 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
               createdAt: Timestamp.now(),
               updatedAt: Timestamp.now(),
             );
-            await ref.read(firebaseServiceProvider).createUser(newUser);
+            await ref.read(firebaseServiceProvider)!.createUser(newUser);
             
             // Navigate to profile completion page based on role
             if (!mounted) return;
@@ -163,7 +229,7 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
             }
           } else {
             // User cancelled role selection, sign out
-            await _authService.signOut();
+            await _authService!.signOut();
           }
         } else {
           // Existing user, check if profile is complete
@@ -195,22 +261,36 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
       
       // Provide more detailed error message
       String errorMessage;
-      if (e is FirebaseAuthException) {
+      if (e is SignInWithAppleAuthorizationException) {
+        switch (e.code) {
+          case AuthorizationErrorCode.canceled:
+            errorMessage = 'Sign-in was cancelled';
+            break;
+          case AuthorizationErrorCode.failed:
+            errorMessage = 'Sign-in failed. Please try again.';
+            break;
+          case AuthorizationErrorCode.invalidResponse:
+            errorMessage = 'Invalid response received. Please try again.';
+            break;
+          case AuthorizationErrorCode.notHandled:
+            errorMessage = 'Sign-in not handled. Please try again.';
+            break;
+          case AuthorizationErrorCode.unknown:
+            errorMessage = 'Apple Sign-In is not available. Please try email sign-in instead.';
+            break;
+          default:
+            errorMessage = 'Error signing in: ${e.message}';
+        }
+      } else if (e is FirebaseAuthException) {
         switch (e.code) {
           case 'ERROR_ABORTED_BY_USER':
             errorMessage = 'Sign-in was cancelled';
             break;
-          case 'ERROR_GOOGLE_SIGN_IN_FAILED':
-            errorMessage = 'Google Sign-In failed. Please try again.';
-            break;
-          case 'ERROR_GOOGLE_AUTH_FAILED':
-            errorMessage = 'Could not authenticate with Google. Please try again.';
-            break;
-          case 'ERROR_MISSING_GOOGLE_AUTH_TOKEN':
-            errorMessage = 'Authentication token missing. Please try again.';
+          case 'ERROR_MISSING_APPLE_AUTH_TOKEN':
+            errorMessage = 'Apple Sign-In failed. Please try again.';
             break;
           case 'ERROR_FIREBASE_AUTH_FAILED':
-            errorMessage = 'Authentication with Firebase failed. Please try again.';
+            errorMessage = 'Authentication failed. Please try again.';
             break;
           case 'account-exists-with-different-credential':
             errorMessage = 'An account already exists with the same email. Try signing in with a different method.';
@@ -224,10 +304,12 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
         debugPrint('Firebase Auth Error: ${e.code} - ${e.message}');
       } else {
         errorMessage = 'Error signing in: ${e.toString()}';
-        debugPrint('Error during Google Sign-In: $e');
+        debugPrint('Error during Apple Sign-In: $e');
       }
       
-      _errorMessage = errorMessage;
+      setState(() {
+        _errorMessage = errorMessage;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(errorMessage),
@@ -696,7 +778,7 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          _errorMessage,
+                          _formatErrorMessage(_errorMessage),
                           style: AppTypography.bodySmall.copyWith(
                             color: AppColors.error,
                             fontWeight: FontWeight.w500,
@@ -754,17 +836,9 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
                 ),
               ),
               
-              // Google Sign In Button
+              // Apple Sign In Button
               if (!_isLoading)
-                _buildSocialButton(
-                  text: 'Sign in with Google',
-                  iconWidget: Image.asset(
-                    'assets/icons/google_icon.png',
-                    height: 24,
-                    width: 24,
-                  ),
-                  onPressed: _loginWithGoogle,
-                ),
+                _buildAppleSignInButton(),
             ],
           ),
         ),
@@ -772,27 +846,17 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
     );
   }
 
-  Widget _buildSocialButton({
-    required String text,
-    Widget? iconWidget,
-    String? icon,
-    Color iconColor = Colors.red,
-    required VoidCallback onPressed,
-  }) {
+  Widget _buildAppleSignInButton() {
     return InkWell(
-      onTap: onPressed,
+      onTap: _loginWithApple,
       child: Container(
         height: 56,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Colors.black,
           borderRadius: BorderRadius.circular(28),
-          border: Border.all(
-            color: const Color(0xFFE2E8F0),
-            width: 1.5,
-          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.02),
+              color: Colors.black.withOpacity(0.1),
               blurRadius: 5,
               offset: const Offset(0, 2),
             ),
@@ -802,29 +866,16 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              iconWidget ?? Container(
-                height: 24,
-                width: 24,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: iconColor.withOpacity(0.1),
-                ),
-                child: Center(
-                  child: Text(
-                    icon ?? '',
-                    style: TextStyle(
-                      color: iconColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
+              Icon(
+                Icons.apple,
+                color: Colors.white,
+                size: 24,
               ),
               const SizedBox(width: 12),
               Text(
-                text,
+                'Sign in with Apple',
                 style: AppTypography.buttonMedium.copyWith(
-                  color: const Color(0xFF2D3748),
+                  color: Colors.white,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -919,7 +970,7 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
                       });
                       
                       try {
-                        await _authService.resetPassword(emailController.text.trim());
+                        await _authService!.resetPassword(emailController.text.trim());
                         
                         if (mounted) {
                           Navigator.pop(context);
@@ -952,5 +1003,23 @@ class _LoginPageState extends ConsumerState<LoginPage> with SingleTickerProvider
         },
       ),
     );
+  }
+
+  // Helper method to format error messages
+  String _formatErrorMessage(String errorMessage) {
+    // Clean up Firebase and Apple authentication error messages for display
+    if (errorMessage.contains('firebase_auth')) {
+      return 'Authentication failed. Please try again.';
+    }
+    
+    if (errorMessage.contains('SignInWithAppleAuthorizationException')) {
+      if (errorMessage.contains('AuthorizationErrorCode.unknown')) {
+        return 'Apple Sign In is not available. Please use email sign-in instead.';
+      }
+      return 'Apple Sign In failed. Please try again.';
+    }
+
+    // Return original error if no specific formatting is needed
+    return errorMessage;
   }
 } 

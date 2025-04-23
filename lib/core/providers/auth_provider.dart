@@ -1,8 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
+import 'package:crypto/crypto.dart';
 
 import '../models/user_model.dart';
 import '../services/firebase_service.dart';
@@ -10,12 +13,6 @@ import 'firebase_provider.dart';
 
 class AuthProvider extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    scopes: <String>[
-      'email',
-      'profile',
-    ],
-  );
   User? _currentUser;
   UserModel? _userModel;
   bool _isLoading = false;
@@ -139,56 +136,65 @@ class AuthProvider extends ChangeNotifier {
     final user = await _firebaseService.getUserById(uid);
     return user != null;
   }
+
+  /// Generates a cryptographically secure random nonce, to be included in a
+  /// credential request.
+  String _generateNonce([int length = 32]) {
+    const charset = '0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._';
+    final random = Random.secure();
+    return List.generate(length, (_) => charset[random.nextInt(charset.length)]).join();
+  }
+
+  /// Returns the sha256 hash of [input] in hex notation.
+  String _sha256ofString(String input) {
+    final bytes = utf8.encode(input);
+    final digest = sha256.convert(bytes);
+    return digest.toString();
+  }
   
-  // Sign in with Google
-  Future<bool> signInWithGoogle() async {
+  // Sign in with Apple
+  Future<bool> signInWithApple() async {
     try {
       _isLoading = true;
       _error = null;
       notifyListeners();
       
-      // First clear any existing sessions
-      try {
-        await _googleSignIn.signOut();
-      } catch (e) {
-        debugPrint("No existing Google session to sign out: $e");
-      }
-      
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn().catchError((error) {
-        debugPrint("Error during Google Sign-In: $error");
-        _error = "Google Sign-In failed: ${error.toString()}";
+      // To prevent replay attacks with the credential returned from Apple, we
+      // include a nonce in the credential request. When signing in with
+      // Firebase, the nonce in the id token returned by Apple, is expected to
+      // match the sha256 hash of `rawNonce`.
+      final rawNonce = _generateNonce();
+      final nonce = _sha256ofString(rawNonce);
+
+      // Request credential for the currently signed in Apple account.
+      final appleCredential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+        nonce: nonce,
+      ).catchError((error) {
+        debugPrint("Error during Apple Sign-In: $error");
+        _error = "Apple Sign-In failed: ${error.toString()}";
         _isLoading = false;
         notifyListeners();
         return null;
       });
       
-      if (googleUser == null) {
+      if (appleCredential == null || appleCredential.identityToken == null) {
+        _error = "Apple authentication tokens are missing";
         _isLoading = false;
         notifyListeners();
         return false;
       }
       
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication.catchError((error) {
-        debugPrint("Error getting Google authentication: $error");
-        _error = "Failed to get Google authentication: ${error.toString()}";
-        _isLoading = false;
-        notifyListeners();
-        return null;
-      });
-      
-      if (googleAuth.accessToken == null || googleAuth.idToken == null) {
-        _error = "Google authentication tokens are missing";
-        _isLoading = false;
-        notifyListeners();
-        return false;
-      }
-      
-      final AuthCredential credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
+      // Create an OAuthCredential from the credential returned by Apple.
+      final oauthCredential = OAuthProvider("apple.com").credential(
+        idToken: appleCredential.identityToken!,
+        rawNonce: rawNonce,
       );
       
-      final UserCredential result = await _auth.signInWithCredential(credential).catchError((error) {
+      final UserCredential result = await _auth.signInWithCredential(oauthCredential).catchError((error) {
         debugPrint("Firebase Auth sign-in failed: $error");
         _error = "Firebase authentication failed: ${error.toString()}";
         _isLoading = false;
@@ -205,6 +211,15 @@ class AuthProvider extends ChangeNotifier {
       
       _currentUser = result.user;
       
+      // If the user doesn't have a display name but we got one from Apple
+      if (_currentUser?.displayName == null || _currentUser!.displayName!.isEmpty) {
+        if (appleCredential.givenName != null && appleCredential.familyName != null) {
+          await _currentUser!.updateDisplayName(
+            '${appleCredential.givenName} ${appleCredential.familyName}'
+          );
+        }
+      }
+      
       // Check if the user exists in Firestore
       bool userExists = await this.userExists(_currentUser!.uid);
       
@@ -213,8 +228,8 @@ class AuthProvider extends ChangeNotifier {
         final UserModel newUser = UserModel(
           id: _currentUser!.uid,
           name: _currentUser!.displayName ?? '',
-          email: _currentUser!.email!,
-          role: UserRole.patient, // Default role for Google sign-in
+          email: _currentUser!.email ?? '',
+          role: UserRole.patient, // Default role for Apple sign-in
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
         );
@@ -240,7 +255,6 @@ class AuthProvider extends ChangeNotifier {
   Future<void> signOut() async {
     try {
       await _auth.signOut();
-      await _googleSignIn.signOut();
       _userModel = null;
       notifyListeners();
     } catch (e) {

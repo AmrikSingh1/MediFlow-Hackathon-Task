@@ -48,7 +48,6 @@ dependencies:
   intl: ^0.20.2
   flutter_dotenv: ^5.2.1
   flutter_secure_storage: ^9.2.4
-  google_sign_in: ^6.3.0
   pdf: ^3.11.3
   flutter_markdown: ^0.7.7
   url_launcher: ^6.3.1
@@ -65,6 +64,8 @@ dependencies:
   animated_text_kit: ^4.2.3
   share_plus: ^10.1.4
   flutter_pdfview: ^1.4.0+1
+  sign_in_with_apple: ^7.0.1
+  crypto: ^3.0.6
 
 dev_dependencies:
   flutter_test:
